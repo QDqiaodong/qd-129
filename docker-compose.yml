@@ -1,0 +1,83 @@
+services:
+  mysql:
+    image: ${DOCKER_REGISTRY}/mysql:8.0
+    container_name: qd-129-mysql
+    ports:
+      - "127.0.0.1:${MYSQL_PORT}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql_data:/var/lib/mysql
+    command: --disable-log-bin
+    networks:
+      - qd-129-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  redis:
+    image: ${DOCKER_REGISTRY}/redis:7-alpine
+    container_name: qd-129-redis
+    ports:
+      - "127.0.0.1:${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - qd-129-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 10s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY}
+    container_name: qd-129-backend
+    ports:
+      - "127.0.0.1:${BACKEND_PORT}:${BACKEND_CONTAINER_PORT}"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - qd-129-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY}
+    container_name: qd-129-frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT}:${FRONTEND_CONTAINER_PORT}"
+    environment:
+      FRONTEND_PORT: ${FRONTEND_CONTAINER_PORT}
+      VITE_PROXY_TARGET: http://backend:${BACKEND_CONTAINER_PORT}
+    depends_on:
+      - backend
+    networks:
+      - qd-129-network
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  qd-129-network:
+    driver: bridge
