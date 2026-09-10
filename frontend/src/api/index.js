@@ -61,3 +61,16 @@ export const batchApi = {
   getAll: () => request.get('/area-change-batch'),
   getById: id => request.get(`/area-change-batch/${id}`)
 }
+
+export const dashboardApi = {
+  getAreaCapacityStats: () => request.get('/dashboard/area-capacity'),
+  getAreaCapacityDetail: (areaId, recentLimit = 10) =>
+    request.get(`/dashboard/area-capacity/${areaId}`, { params: { recentLimit } }),
+  getChangeTrend: params => request.get('/dashboard/change-trend', {
+    params: {
+      startDate: params?.startDate || undefined,
+      endDate: params?.endDate || undefined,
+      areaId: params?.areaId || undefined
+    }
+  })
+}

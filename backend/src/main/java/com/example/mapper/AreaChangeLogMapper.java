@@ -57,4 +57,20 @@ public interface AreaChangeLogMapper {
             "LEFT JOIN reading_area ra_new ON log.new_area_id = ra_new.id " +
             "WHERE log.batch_no = #{batchNo} ORDER BY log.id")
     List<AreaChangeLog> findByBatchNoFromTable01(@Param("batchNo") String batchNo);
+
+    @Select("SELECT log.*, dc.asset_code, ra_old.area_name as old_area_name, ra_new.area_name as new_area_name " +
+            "FROM area_change_log_00 log INNER JOIN desk_chair dc ON log.desk_chair_id = dc.id AND dc.status >= 0 " +
+            "LEFT JOIN reading_area ra_old ON log.old_area_id = ra_old.id " +
+            "LEFT JOIN reading_area ra_new ON log.new_area_id = ra_new.id " +
+            "WHERE log.old_area_id = #{areaId} OR log.new_area_id = #{areaId} " +
+            "ORDER BY log.created_at DESC LIMIT #{limit}")
+    List<AreaChangeLog> findByAreaIdFromTable00(@Param("areaId") Long areaId, @Param("limit") int limit);
+
+    @Select("SELECT log.*, dc.asset_code, ra_old.area_name as old_area_name, ra_new.area_name as new_area_name " +
+            "FROM area_change_log_01 log INNER JOIN desk_chair dc ON log.desk_chair_id = dc.id AND dc.status >= 0 " +
+            "LEFT JOIN reading_area ra_old ON log.old_area_id = ra_old.id " +
+            "LEFT JOIN reading_area ra_new ON log.new_area_id = ra_new.id " +
+            "WHERE log.old_area_id = #{areaId} OR log.new_area_id = #{areaId} " +
+            "ORDER BY log.created_at DESC LIMIT #{limit}")
+    List<AreaChangeLog> findByAreaIdFromTable01(@Param("areaId") Long areaId, @Param("limit") int limit);
 }

@@ -11,6 +11,11 @@ const routes = [
     component: () => import('../views/ReadingArea.vue')
   },
   {
+    path: '/capacity-dashboard',
+    name: 'CapacityDashboard',
+    component: () => import('../views/CapacityDashboard.vue')
+  },
+  {
     path: '/desk-chair',
     name: 'DeskChair',
     component: () => import('../views/DeskChair.vue')

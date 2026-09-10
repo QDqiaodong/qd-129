@@ -32,4 +32,17 @@ public class AreaChangeLogServiceImpl implements AreaChangeLogService {
         logs.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
         return logs;
     }
+
+    @Override
+    public List<AreaChangeLog> findRecentByAreaId(Long areaId, int limit) {
+        // 每个分片多取一些再合并截断，保证整体最近的记录排在前面
+        List<AreaChangeLog> logs = new ArrayList<>();
+        logs.addAll(areaChangeLogMapper.findByAreaIdFromTable00(areaId, limit));
+        logs.addAll(areaChangeLogMapper.findByAreaIdFromTable01(areaId, limit));
+        logs.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
+        if (logs.size() > limit) {
+            return new ArrayList<>(logs.subList(0, limit));
+        }
+        return logs;
+    }
 }

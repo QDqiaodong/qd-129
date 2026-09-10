@@ -1,4 +1,4 @@
-CREATE TABLE reading_area (
+CREATE TABLE IF NOT EXISTS reading_area (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     area_code VARCHAR(50) NOT NULL UNIQUE,
     area_name VARCHAR(100) NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE reading_area (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE desk_chair (
+CREATE TABLE IF NOT EXISTS desk_chair (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     asset_code VARCHAR(50) NOT NULL UNIQUE,
     capacity INT NOT NULL DEFAULT 1,
@@ -19,7 +19,7 @@ CREATE TABLE desk_chair (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE tag (
+CREATE TABLE IF NOT EXISTS tag (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     tag_code VARCHAR(50) NOT NULL UNIQUE,
     tag_name VARCHAR(100) NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE tag (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE desk_chair_tag (
+CREATE TABLE IF NOT EXISTS desk_chair_tag (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     desk_chair_id BIGINT NOT NULL,
     tag_id BIGINT NOT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE desk_chair_tag (
     UNIQUE (desk_chair_id, tag_id)
 );
 
-CREATE TABLE area_change_log_00 (
+CREATE TABLE IF NOT EXISTS area_change_log_00 (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     desk_chair_id BIGINT NOT NULL,
     old_area_id BIGINT,
@@ -49,7 +49,7 @@ CREATE TABLE area_change_log_00 (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE area_change_log_01 (
+CREATE TABLE IF NOT EXISTS area_change_log_01 (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     desk_chair_id BIGINT NOT NULL,
     old_area_id BIGINT,
@@ -60,7 +60,7 @@ CREATE TABLE area_change_log_01 (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE area_change_batch (
+CREATE TABLE IF NOT EXISTS area_change_batch (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     batch_no VARCHAR(40) NOT NULL UNIQUE,
     target_area_id BIGINT NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE area_change_batch (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE area_change_batch_item (
+CREATE TABLE IF NOT EXISTS area_change_batch_item (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     batch_id BIGINT NOT NULL,
     batch_no VARCHAR(40) NOT NULL,

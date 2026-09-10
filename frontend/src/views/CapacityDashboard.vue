@@ -1,0 +1,744 @@
+<template>
+  <div class="page-container">
+    <div class="page-header">
+      <h2>阅览区容量运营看板</h2>
+      <el-button :loading="statsLoading" @click="loadStats">
+        <el-icon><Refresh /></el-icon>
+        刷新
+      </el-button>
+    </div>
+
+    <!-- 全馆概览 -->
+    <el-row :gutter="16" class="overview-row">
+      <el-col :span="6">
+        <el-card shadow="hover" class="overview-card">
+          <div class="overview-label">阅览分区</div>
+          <div class="overview-value">{{ overview.areaCount }}</div>
+          <div class="overview-sub">个分区</div>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover" class="overview-card">
+          <div class="overview-label">桌椅总数</div>
+          <div class="overview-value">{{ overview.totalCount }}</div>
+          <div class="overview-sub">可用 {{ overview.availableCount }} / 停用 {{ overview.disabledCount }}</div>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover" class="overview-card">
+          <div class="overview-label">可用容纳人数</div>
+          <div class="overview-value primary">{{ overview.totalCapacity }}</div>
+          <div class="overview-sub">人（仅统计可用桌椅）</div>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover" class="overview-card">
+          <div class="overview-label">区间调区变更</div>
+          <div class="overview-value warning">{{ overview.trendCount }}</div>
+          <div class="overview-sub">{{ dateRange[0] }} ~ {{ dateRange[1] }}</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 分区容量卡片 -->
+    <el-card class="section-card">
+      <template #header>
+        <div class="section-header">
+          <span class="section-title">分区容量明细</span>
+          <span class="section-tip">点击分区卡片可下钻查看桌椅与最近变更</span>
+        </div>
+      </template>
+
+      <div v-loading="statsLoading">
+        <el-result
+          v-if="statsError"
+          icon="error"
+          title="分区容量数据加载失败"
+          :sub-title="statsError"
+        >
+          <template #extra>
+            <el-button type="primary" @click="loadStats">点击重试</el-button>
+          </template>
+        </el-result>
+
+        <el-empty v-else-if="!statsLoading && areaStats.length === 0" description="暂无分区数据" />
+
+        <el-row v-else :gutter="16">
+          <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="area in areaStats" :key="area.areaId">
+            <div class="area-card" @click="openDetail(area.areaId)">
+              <div class="area-card-header">
+                <div class="area-title-wrap">
+                  <span class="area-code">{{ area.areaCode }}</span>
+                  <span class="area-name">{{ area.areaName }}</span>
+                </div>
+                <el-tag size="small" :type="area.areaStatus === 1 ? 'success' : 'info'">
+                  {{ area.areaStatus === 1 ? '启用' : '停用' }}
+                </el-tag>
+              </div>
+
+              <div class="area-metrics">
+                <div class="metric">
+                  <span class="metric-value">{{ area.totalCount ?? 0 }}</span>
+                  <span class="metric-label">桌椅总数</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-value available">{{ area.availableCount ?? 0 }}</span>
+                  <span class="metric-label">可用</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-value disabled">{{ area.disabledCount ?? 0 }}</span>
+                  <span class="metric-label">停用</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-value primary">{{ area.totalCapacity ?? 0 }}</span>
+                  <span class="metric-label">容纳人数</span>
+                </div>
+              </div>
+
+              <div class="area-tags">
+                <template v-if="area.tagStats && area.tagStats.length">
+                  <el-tooltip
+                    v-for="tag in area.tagStats"
+                    :key="tag.tagId"
+                    :content="`${tag.tagName}：${tag.deskChairCount} 件`"
+                    placement="top"
+                  >
+                    <span
+                      class="area-tag"
+                      :style="{ backgroundColor: tag.tagColor || '#909399' }"
+                    >{{ tag.tagName }} · {{ tag.deskChairCount }}</span>
+                  </el-tooltip>
+                </template>
+                <span v-else class="no-tag">暂无标签</span>
+              </div>
+
+              <div class="area-card-footer">
+                <span>查看桌椅与变更记录</span>
+                <el-icon><ArrowRight /></el-icon>
+              </div>
+            </div>
+          </el-col>
+        </el-row>
+      </div>
+    </el-card>
+
+    <!-- 调区变更趋势 -->
+    <el-card class="section-card">
+      <template #header>
+        <div class="section-header">
+          <span class="section-title">调区变更趋势</span>
+          <div class="trend-filters">
+            <el-select
+              v-model="trendAreaId"
+              placeholder="全馆分区"
+              clearable
+              class="trend-area-select"
+              @change="loadTrend"
+            >
+              <el-option
+                v-for="area in areaStats"
+                :key="area.areaId"
+                :label="area.areaName"
+                :value="area.areaId"
+              />
+            </el-select>
+            <el-date-picker
+              v-model="dateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              value-format="YYYY-MM-DD"
+              :disabled-date="disableFutureDate"
+              @change="loadTrend"
+            />
+            <el-button :loading="trendLoading" @click="loadTrend">
+              <el-icon><Refresh /></el-icon>
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <div v-loading="trendLoading" class="trend-body">
+        <el-result
+          v-if="trendError"
+          icon="error"
+          title="变更趋势加载失败"
+          :sub-title="trendError"
+        >
+          <template #extra>
+            <el-button type="primary" @click="loadTrend">点击重试</el-button>
+          </template>
+        </el-result>
+
+        <template v-else>
+          <el-empty v-if="trendData.length === 0" description="所选区间暂无数据" />
+          <div v-else-if="trendData.length > 31" class="trend-scroll">
+            <div class="trend-chart">
+              <bar-item v-for="item in trendData" :key="item.date" :item="item" :max="trendMax" />
+            </div>
+          </div>
+          <div v-else class="trend-chart">
+            <bar-item v-for="item in trendData" :key="item.date" :item="item" :max="trendMax" />
+          </div>
+        </template>
+      </div>
+    </el-card>
+
+    <!-- 分区下钻抽屉 -->
+    <el-drawer v-model="detailVisible" :title="detailTitle" size="60%">
+      <div v-loading="detailLoading">
+        <el-result
+          v-if="detailError"
+          icon="error"
+          title="分区明细加载失败"
+          :sub-title="detailError"
+        >
+          <template #extra>
+            <el-button type="primary" @click="reloadDetail">点击重试</el-button>
+          </template>
+        </el-result>
+
+        <template v-else-if="detail">
+          <el-descriptions :column="4" border class="detail-desc">
+            <el-descriptions-item label="桌椅总数">{{ detail.totalCount ?? 0 }}</el-descriptions-item>
+            <el-descriptions-item label="可用">
+              <span class="available">{{ detail.availableCount ?? 0 }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="停用">
+              <span class="disabled">{{ detail.disabledCount ?? 0 }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="容纳人数">
+              <span class="primary">{{ detail.totalCapacity ?? 0 }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="分区描述" :span="4">
+              {{ detail.description || '暂无描述' }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <h3 class="detail-subtitle">桌椅明细（{{ detail.deskChairs?.length || 0 }}）</h3>
+          <el-table :data="detail.deskChairs || []" border size="small">
+            <el-table-column prop="assetCode" label="资产编号" width="130" />
+            <el-table-column prop="capacity" label="容纳人数" width="90" align="center" />
+            <el-table-column prop="dimensions" label="尺寸">
+              <template #default="scope">{{ scope.row.dimensions || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="90" align="center">
+              <template #default="scope">
+                <el-tag size="small" :type="scope.row.status === 1 ? 'success' : 'danger'">
+                  {{ scope.row.status === 1 ? '可用' : '停用' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="标签" min-width="160">
+              <template #default="scope">
+                <template v-if="scope.row.tags && scope.row.tags.length">
+                  <el-tag
+                    v-for="tag in scope.row.tags"
+                    :key="tag.id"
+                    size="small"
+                    class="desk-tag"
+                    :style="{ backgroundColor: tag.tagColor }"
+                  >{{ tag.tagName }}</el-tag>
+                </template>
+                <span v-else class="no-tag">-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty
+            v-if="!detail.deskChairs || detail.deskChairs.length === 0"
+            description="该分区暂无桌椅"
+          />
+
+          <h3 class="detail-subtitle">最近调区变更（{{ detail.recentChanges?.length || 0 }}）</h3>
+          <el-table :data="detail.recentChanges || []" border size="small">
+            <el-table-column prop="assetCode" label="资产编号" width="120" />
+            <el-table-column label="原分区" min-width="110">
+              <template #default="scope">{{ scope.row.oldAreaName || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="新分区" min-width="110">
+              <template #default="scope">{{ scope.row.newAreaName || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="changeReason" label="变更原因" min-width="130">
+              <template #default="scope">{{ scope.row.changeReason || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="operator" label="操作人" width="100" />
+            <el-table-column label="时间" width="170">
+              <template #default="scope">{{ formatTime(scope.row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-empty
+            v-if="!detail.recentChanges || detail.recentChanges.length === 0"
+            description="暂无调区变更记录"
+          />
+        </template>
+      </div>
+    </el-drawer>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, h, onMounted } from 'vue'
+import { Refresh, ArrowRight } from '@element-plus/icons-vue'
+import { dashboardApi } from '../api'
+
+// 简单柱状条：使用渲染函数避免再注册组件文件，原生 title 作为悬浮提示
+const BarItem = {
+  props: {
+    item: { type: Object, required: true },
+    max: { type: Number, default: 1 }
+  },
+  setup(props) {
+    return () => {
+      const count = props.item.changeCount || 0
+      const height = count > 0 && props.max > 0
+        ? Math.max(6, Math.round((count / props.max) * 160))
+        : 2
+      return h('div', { class: 'bar-item' }, [
+        h('div', {
+          class: 'bar-tooltip-wrap',
+          title: `${props.item.date}：${count} 次调区`
+        }, [
+          h('div', {
+            class: count > 0 ? 'bar bar-active' : 'bar',
+            style: { height: height + 'px' }
+          }),
+          h('div', { class: 'bar-count' }, String(count))
+        ]),
+        h('div', { class: 'bar-date' }, props.item.date.slice(5))
+      ])
+    }
+  }
+}
+const barItem = BarItem
+
+const formatTime = (time) => {
+  if (!time) return '-'
+  return new Date(time).toLocaleString('zh-CN', { hour12: false })
+}
+
+// ---- 分区容量统计 ----
+const areaStats = ref([])
+const statsLoading = ref(false)
+const statsError = ref('')
+
+const loadStats = async () => {
+  statsLoading.value = true
+  statsError.value = ''
+  try {
+    areaStats.value = await dashboardApi.getAreaCapacityStats()
+  } catch (e) {
+    areaStats.value = []
+    statsError.value = e?.message || '网络异常，请稍后重试'
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+// ---- 调区变更趋势 ----
+const today = new Date()
+const monthAgo = new Date()
+monthAgo.setDate(today.getDate() - 29)
+const fmt = d => {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+const dateRange = ref([fmt(monthAgo), fmt(today)])
+const trendAreaId = ref(null)
+const trendData = ref([])
+const trendLoading = ref(false)
+const trendError = ref('')
+
+const trendMax = computed(() =>
+  trendData.value.reduce((max, item) => Math.max(max, item.changeCount), 0)
+)
+
+const loadTrend = async () => {
+  if (!dateRange.value || dateRange.value.length !== 2) {
+    trendData.value = []
+    return
+  }
+  trendLoading.value = true
+  trendError.value = ''
+  try {
+    trendData.value = await dashboardApi.getChangeTrend({
+      startDate: dateRange.value[0],
+      endDate: dateRange.value[1],
+      areaId: trendAreaId.value
+    })
+  } catch (e) {
+    trendData.value = []
+    trendError.value = e?.message || '网络异常，请稍后重试'
+  } finally {
+    trendLoading.value = false
+  }
+}
+
+const disableFutureDate = (date) => date.getTime() > Date.now()
+
+// ---- 全馆概览汇总 ----
+const overview = computed(() => {
+  const summary = {
+    areaCount: areaStats.value.length,
+    totalCount: 0,
+    availableCount: 0,
+    disabledCount: 0,
+    totalCapacity: 0,
+    trendCount: 0
+  }
+  areaStats.value.forEach(area => {
+    summary.totalCount += area.totalCount || 0
+    summary.availableCount += area.availableCount || 0
+    summary.disabledCount += area.disabledCount || 0
+    summary.totalCapacity += area.totalCapacity || 0
+  })
+  summary.trendCount = trendData.value.reduce((sum, item) => sum + item.changeCount, 0)
+  return summary
+})
+
+// ---- 分区下钻 ----
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detailError = ref('')
+const detail = ref(null)
+const detailAreaId = ref(null)
+
+const detailTitle = computed(() => {
+  if (!detail.value) return '分区明细'
+  return `${detail.value.areaCode} ${detail.value.areaName}`
+})
+
+const openDetail = async (areaId) => {
+  detailAreaId.value = areaId
+  detailVisible.value = true
+  await loadDetail()
+}
+
+const loadDetail = async () => {
+  if (!detailAreaId.value) return
+  detailLoading.value = true
+  detailError.value = ''
+  detail.value = null
+  try {
+    detail.value = await dashboardApi.getAreaCapacityDetail(detailAreaId.value, 10)
+  } catch (e) {
+    detailError.value = e?.message || '网络异常，请稍后重试'
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+const reloadDetail = () => loadDetail()
+
+onMounted(() => {
+  loadStats()
+  loadTrend()
+})
+</script>
+
+<style scoped>
+.page-container {
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.page-header h2 {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.overview-row {
+  margin-bottom: 4px;
+}
+
+.overview-card {
+  margin-bottom: 16px;
+}
+
+.overview-label {
+  font-size: 13px;
+  color: #909399;
+}
+
+.overview-value {
+  font-size: 30px;
+  font-weight: 700;
+  color: #303133;
+  line-height: 1.4;
+}
+
+.overview-value.primary {
+  color: #409eff;
+}
+
+.overview-value.warning {
+  color: #e6a23c;
+}
+
+.overview-sub {
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
+.section-card {
+  margin-bottom: 20px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.section-tip {
+  font-size: 12px;
+  color: #909399;
+}
+
+.trend-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trend-area-select {
+  width: 160px;
+}
+
+/* 分区卡片 */
+.area-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.area-card:hover {
+  border-color: #409eff;
+  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.area-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.area-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.area-code {
+  background: #409eff;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.area-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-metrics {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.metric-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.metric-value.available {
+  color: #67c23a;
+}
+
+.metric-value.disabled {
+  color: #f56c6c;
+}
+
+.metric-value.primary {
+  color: #409eff;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.area-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 22px;
+  margin-bottom: 10px;
+}
+
+.area-tag {
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  line-height: 1.5;
+}
+
+.no-tag {
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
+.area-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px dashed #ebeef5;
+  font-size: 12px;
+  color: #409eff;
+}
+
+/* 趋势柱状图 */
+.trend-body {
+  min-height: 220px;
+}
+
+.trend-scroll {
+  overflow-x: auto;
+}
+
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-height: 200px;
+  padding: 12px 8px 0;
+}
+
+.trend-scroll .trend-chart {
+  min-width: max-content;
+}
+
+.bar-item {
+  flex: 1;
+  min-width: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.bar-tooltip-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 170px;
+  width: 100%;
+}
+
+.bar {
+  width: 60%;
+  max-width: 24px;
+  background: #dcdfe6;
+  border-radius: 3px 3px 0 0;
+  transition: background 0.2s;
+}
+
+.bar-active {
+  background: linear-gradient(180deg, #79bbff 0%, #409eff 100%);
+}
+
+.bar-tooltip-wrap:hover .bar-active {
+  background: linear-gradient(180deg, #a0cfff 0%, #79bbff 100%);
+}
+
+.bar-tooltip-wrap:hover::after {
+  content: attr(data-tip);
+}
+
+.bar-count {
+  font-size: 11px;
+  color: #606266;
+  line-height: 1;
+}
+
+.bar-date {
+  font-size: 10px;
+  color: #909399;
+  transform: rotate(-45deg);
+  transform-origin: center top;
+  white-space: nowrap;
+  height: 38px;
+}
+
+/* 下钻明细 */
+.detail-desc {
+  margin-bottom: 20px;
+}
+
+.detail-subtitle {
+  font-size: 15px;
+  margin: 20px 0 10px;
+}
+
+.desk-tag {
+  margin-right: 4px;
+  margin-bottom: 2px;
+}
+
+.available {
+  color: #67c23a;
+  font-weight: 600;
+}
+
+.disabled {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
+.primary {
+  color: #409eff;
+  font-weight: 600;
+}
+</style>

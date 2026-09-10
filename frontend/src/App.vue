@@ -13,6 +13,10 @@
           <el-icon><Location /></el-icon>
           <span>阅览分区</span>
         </el-menu-item>
+        <el-menu-item index="/capacity-dashboard">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>容量运营看板</span>
+        </el-menu-item>
         <el-menu-item index="/desk-chair">
           <el-icon><Grid /></el-icon>
           <span>桌椅管理</span>
@@ -40,7 +44,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Location, Grid, PriceTag, Document, Switch } from '@element-plus/icons-vue'
+import { Location, Grid, PriceTag, Document, Switch, DataAnalysis } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

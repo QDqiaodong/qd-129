@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.mapper.DashboardMapper">
+
+    <select id="findAreaCapacityStats" resultType="com.example.vo.AreaCapacityStatVO">
+        SELECT ra.id AS areaId,
+               ra.area_code AS areaCode,
+               ra.area_name AS areaName,
+               ra.status AS areaStatus,
+               COUNT(dc.id) AS totalCount,
+               COALESCE(SUM(CASE WHEN dc.status = 1 THEN 1 ELSE 0 END), 0) AS availableCount,
+               COALESCE(SUM(CASE WHEN dc.status = 0 THEN 1 ELSE 0 END), 0) AS disabledCount,
+               COALESCE(SUM(CASE WHEN dc.status = 1 THEN dc.capacity ELSE 0 END), 0) AS totalCapacity
+        FROM reading_area ra
+        LEFT JOIN desk_chair dc ON ra.id = dc.area_id AND dc.status &gt;= 0
+        GROUP BY ra.id, ra.area_code, ra.area_name, ra.status
+        ORDER BY ra.area_code
+    </select>
+
+    <select id="findTagStatsByAreaId" resultType="com.example.vo.AreaTagStatVO">
+        SELECT dc.area_id AS areaId,
+               t.id AS tagId,
+               t.tag_name AS tagName,
+               t.tag_color AS tagColor,
+               COUNT(dc.id) AS deskChairCount
+        FROM desk_chair_tag dct
+        INNER JOIN desk_chair dc ON dct.desk_chair_id = dc.id AND dc.status &gt;= 0
+        INNER JOIN tag t ON dct.tag_id = t.id AND t.status = 1
+        WHERE dc.area_id = #{areaId}
+        GROUP BY dc.area_id, t.id, t.tag_name, t.tag_color
+        ORDER BY deskChairCount DESC, t.tag_code
+    </select>
+
+    <select id="findAllTagStats" resultType="com.example.vo.AreaTagStatVO">
+        SELECT dc.area_id AS areaId,
+               t.id AS tagId,
+               t.tag_name AS tagName,
+               t.tag_color AS tagColor,
+               COUNT(dc.id) AS deskChairCount
+        FROM desk_chair_tag dct
+        INNER JOIN desk_chair dc ON dct.desk_chair_id = dc.id AND dc.status &gt;= 0
+        INNER JOIN tag t ON dct.tag_id = t.id AND t.status = 1
+        GROUP BY dc.area_id, t.id, t.tag_name, t.tag_color
+        ORDER BY dc.area_id, deskChairCount DESC, t.tag_code
+    </select>
+
+    <select id="findChangeTimesFromTable00" resultType="java.time.LocalDateTime">
+        SELECT log.created_at AS createdAt
+        FROM area_change_log_00 log
+        INNER JOIN desk_chair dc ON log.desk_chair_id = dc.id AND dc.status &gt;= 0
+        WHERE log.created_at &gt;= #{start} AND log.created_at &lt; #{end}
+        <if test="areaId != null">
+            AND (log.old_area_id = #{areaId} OR log.new_area_id = #{areaId})
+        </if>
+    </select>
+
+    <select id="findChangeTimesFromTable01" resultType="java.time.LocalDateTime">
+        SELECT log.created_at AS createdAt
+        FROM area_change_log_01 log
+        INNER JOIN desk_chair dc ON log.desk_chair_id = dc.id AND dc.status &gt;= 0
+        WHERE log.created_at &gt;= #{start} AND log.created_at &lt; #{end}
+        <if test="areaId != null">
+            AND (log.old_area_id = #{areaId} OR log.new_area_id = #{areaId})
+        </if>
+    </select>
+
+</mapper>
