@@ -80,6 +80,13 @@ public class DeskChairServiceImpl implements DeskChairService {
     }
 
     @Override
+    public List<DeskChair> search(Long areaId, List<Long> tagIds) {
+        List<DeskChair> list = deskChairMapper.search(areaId, tagIds);
+        list.forEach(this::loadTags);
+        return list;
+    }
+
+    @Override
     public DeskChair findById(Long id) {
         DeskChair deskChair = deskChairMapper.selectById(id);
         loadTags(deskChair);

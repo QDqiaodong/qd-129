@@ -14,6 +14,8 @@ public interface DeskChairService {
 
     List<DeskChair> findByTagIds(List<Long> tagIds);
 
+    List<DeskChair> search(Long areaId, List<Long> tagIds);
+
     DeskChair findById(Long id);
 
     DeskChair findByAssetCode(String assetCode);

@@ -11,7 +11,8 @@ request.interceptors.response.use(
   response => response.data,
   error => {
     console.error('Request error:', error)
-    throw error
+    error.message = error.response?.data?.message || error.message || '请求失败'
+    return Promise.reject(error)
   }
 )
 
@@ -28,6 +29,9 @@ export const deskChairApi = {
   getByAreaId: areaId => request.get(`/desk-chair/area/${areaId}`),
   getByTagId: tagId => request.get(`/desk-chair/tag/${tagId}`),
   getByTagIds: tagIds => request.get('/desk-chair/tags', { params: { tagIds } }),
+  search: params => request.get('/desk-chair/search', {
+    params: { areaId: params.areaId || undefined, tagIds: params.tagIds }
+  }),
   getById: id => request.get(`/desk-chair/${id}`),
   create: data => request.post('/desk-chair', data),
   update: data => request.put('/desk-chair', data),
@@ -49,4 +53,11 @@ export const tagApi = {
 export const changeLogApi = {
   getAll: () => request.get('/area-change-log'),
   getByDeskChairId: deskChairId => request.get(`/area-change-log/desk-chair/${deskChairId}`)
+}
+
+export const batchApi = {
+  preview: data => request.post('/area-change-batch/preview', data),
+  execute: data => request.post('/area-change-batch/execute', data),
+  getAll: () => request.get('/area-change-batch'),
+  getById: id => request.get(`/area-change-batch/${id}`)
 }

@@ -37,6 +37,12 @@ public class DeskChairController {
         return ResponseEntity.ok(deskChairService.findByTagIds(tagIds));
     }
 
+    @GetMapping("/search")
+    public ResponseEntity<List<DeskChair>> search(@RequestParam(required = false) Long areaId,
+                                                  @RequestParam(required = false) List<Long> tagIds) {
+        return ResponseEntity.ok(deskChairService.search(areaId, tagIds));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<DeskChair> getById(@PathVariable Long id) {
         return ResponseEntity.ok(deskChairService.findById(id));

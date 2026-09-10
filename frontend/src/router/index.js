@@ -21,6 +21,11 @@ const routes = [
     component: () => import('../views/Tag.vue')
   },
   {
+    path: '/batch-transfer',
+    name: 'BatchTransfer',
+    component: () => import('../views/BatchTransfer.vue')
+  },
+  {
     path: '/change-log',
     name: 'ChangeLog',
     component: () => import('../views/ChangeLog.vue')

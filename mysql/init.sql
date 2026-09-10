@@ -50,8 +50,10 @@ CREATE TABLE IF NOT EXISTS area_change_log_00 (
     new_area_id BIGINT NOT NULL,
     change_reason VARCHAR(500),
     operator VARCHAR(100),
+    batch_no VARCHAR(40),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (desk_chair_id) REFERENCES desk_chair(id)
+    FOREIGN KEY (desk_chair_id) REFERENCES desk_chair(id),
+    INDEX idx_batch_no (batch_no)
 );
 
 CREATE TABLE IF NOT EXISTS area_change_log_01 (
@@ -61,8 +63,43 @@ CREATE TABLE IF NOT EXISTS area_change_log_01 (
     new_area_id BIGINT NOT NULL,
     change_reason VARCHAR(500),
     operator VARCHAR(100),
+    batch_no VARCHAR(40),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (desk_chair_id) REFERENCES desk_chair(id)
+    FOREIGN KEY (desk_chair_id) REFERENCES desk_chair(id),
+    INDEX idx_batch_no (batch_no)
+);
+
+CREATE TABLE IF NOT EXISTS area_change_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no VARCHAR(40) NOT NULL UNIQUE,
+    target_area_id BIGINT NOT NULL,
+    total_count INT NOT NULL DEFAULT 0,
+    success_count INT NOT NULL DEFAULT 0,
+    fail_count INT NOT NULL DEFAULT 0,
+    change_reason VARCHAR(500),
+    operator VARCHAR(100),
+    status VARCHAR(20) NOT NULL COMMENT 'PROCESSING/SUCCESS/FAILED',
+    error_message VARCHAR(1000),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (target_area_id) REFERENCES reading_area(id)
+);
+
+CREATE TABLE IF NOT EXISTS area_change_batch_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    batch_no VARCHAR(40) NOT NULL,
+    desk_chair_id BIGINT NOT NULL,
+    asset_code VARCHAR(50),
+    old_area_id BIGINT,
+    new_area_id BIGINT,
+    change_log_id BIGINT,
+    status VARCHAR(20) NOT NULL COMMENT 'PENDING/SUCCESS/FAILED',
+    error_message VARCHAR(1000),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (batch_id) REFERENCES area_change_batch(id),
+    INDEX idx_batch_no (batch_no),
+    INDEX idx_desk_chair_id (desk_chair_id)
 );
 
 INSERT INTO reading_area (area_code, area_name, description) VALUES 

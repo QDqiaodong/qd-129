@@ -17,6 +17,10 @@
           <el-icon><Grid /></el-icon>
           <span>桌椅管理</span>
         </el-menu-item>
+        <el-menu-item index="/batch-transfer">
+          <el-icon><Switch /></el-icon>
+          <span>批量调区</span>
+        </el-menu-item>
         <el-menu-item index="/tag">
           <el-icon><PriceTag /></el-icon>
           <span>标签管理</span>
@@ -36,7 +40,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Location, Grid, PriceTag, Document } from '@element-plus/icons-vue'
+import { Location, Grid, PriceTag, Document, Switch } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

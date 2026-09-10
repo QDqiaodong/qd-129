@@ -14,6 +14,12 @@
       <el-table-column prop="newAreaName" label="新分区" />
       <el-table-column prop="changeReason" label="变更原因" />
       <el-table-column prop="operator" label="操作人" />
+      <el-table-column label="所属批次" width="190">
+        <template #default="scope">
+          <span v-if="scope.row.batchNo" class="batch-no">{{ scope.row.batchNo }}</span>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="createdAt" label="变更时间">
         <template #default="scope">
           {{ formatTime(scope.row.createdAt) }}
@@ -60,5 +66,11 @@ onMounted(loadData)
 .page-header h2 {
   font-size: 22px;
   font-weight: 600;
+}
+
+.batch-no {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  color: #409eff;
 }
 </style>
