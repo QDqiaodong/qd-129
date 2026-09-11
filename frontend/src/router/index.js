@@ -34,6 +34,11 @@ const routes = [
     path: '/change-log',
     name: 'ChangeLog',
     component: () => import('../views/ChangeLog.vue')
+  },
+  {
+    path: '/stocktake',
+    name: 'Stocktake',
+    component: () => import('../views/Stocktake.vue')
   }
 ]
 

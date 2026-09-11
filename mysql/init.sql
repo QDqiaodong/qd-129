@@ -102,7 +102,66 @@ CREATE TABLE IF NOT EXISTS area_change_batch_item (
     INDEX idx_desk_chair_id (desk_chair_id)
 );
 
-INSERT INTO reading_area (area_code, area_name, description) VALUES 
+CREATE TABLE IF NOT EXISTS stocktake_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no VARCHAR(40) NOT NULL UNIQUE,
+    area_id BIGINT NOT NULL,
+    expected_count INT NOT NULL DEFAULT 0 COMMENT '应盘数量：分区内在册桌椅数（含停用）',
+    actual_count INT NOT NULL DEFAULT 0 COMMENT '实盘数量：本次录入/导入唯一资产条数',
+    checked_count INT NOT NULL DEFAULT 0 COMMENT '已核数量：已逐项确认的明细数',
+    diff_count INT NOT NULL DEFAULT 0 COMMENT '差异数量：非一致明细数',
+    remark VARCHAR(500),
+    operator VARCHAR(100),
+    status VARCHAR(20) NOT NULL COMMENT 'OPEN/COMPLETED',
+    completed_at DATETIME NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (area_id) REFERENCES reading_area(id),
+    INDEX idx_area_status (area_id, status)
+);
+
+CREATE TABLE IF NOT EXISTS stocktake_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    batch_no VARCHAR(40) NOT NULL,
+    desk_chair_id BIGINT NULL,
+    asset_code VARCHAR(50) NOT NULL,
+    diff_type VARCHAR(20) NOT NULL COMMENT 'MATCH/MISSING/SURPLUS/WRONG_AREA/STATUS_MISMATCH/TAG_MISMATCH',
+    diff_detail VARCHAR(1000),
+    book_area_id BIGINT NULL,
+    book_status TINYINT NULL,
+    book_tag_ids VARCHAR(500),
+    book_tag_names VARCHAR(1000),
+    actual_area_id BIGINT NULL,
+    actual_status TINYINT NULL,
+    actual_tag_ids VARCHAR(500),
+    actual_tag_names VARCHAR(1000),
+    check_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/CONFIRMED',
+    handle_opinion VARCHAR(1000),
+    confirmed_by VARCHAR(100),
+    confirmed_at DATETIME NULL,
+    recheck_count INT NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (batch_id) REFERENCES stocktake_batch(id),
+    INDEX idx_batch_no (batch_no),
+    INDEX idx_asset_code (asset_code)
+);
+
+CREATE TABLE IF NOT EXISTS stocktake_handle_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    item_id BIGINT NULL,
+    handle_action VARCHAR(20) NOT NULL COMMENT 'SUBMIT/CONFIRM/RECHECK/COMPLETE',
+    opinion VARCHAR(1000),
+    operator VARCHAR(100),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (batch_id) REFERENCES stocktake_batch(id),
+    INDEX idx_batch_id (batch_id),
+    INDEX idx_item_id (item_id)
+);
+
+INSERT INTO reading_area (area_code, area_name, description) VALUES
 ('A001', '第一阅览区', '主馆一层东侧，自然科学类'),
 ('A002', '第二阅览区', '主馆一层西侧，社会科学类'),
 ('B001', '第三阅览区', '主馆二层东侧，文学艺术类'),

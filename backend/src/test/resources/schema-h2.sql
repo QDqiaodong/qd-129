@@ -88,3 +88,54 @@ CREATE TABLE IF NOT EXISTS area_change_batch_item (
     error_message VARCHAR(1000),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS stocktake_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no VARCHAR(40) NOT NULL UNIQUE,
+    area_id BIGINT NOT NULL,
+    expected_count INT NOT NULL DEFAULT 0,
+    actual_count INT NOT NULL DEFAULT 0,
+    checked_count INT NOT NULL DEFAULT 0,
+    diff_count INT NOT NULL DEFAULT 0,
+    remark VARCHAR(500),
+    operator VARCHAR(100),
+    status VARCHAR(20) NOT NULL,
+    completed_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stocktake_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    batch_no VARCHAR(40) NOT NULL,
+    desk_chair_id BIGINT NULL,
+    asset_code VARCHAR(50) NOT NULL,
+    diff_type VARCHAR(20) NOT NULL,
+    diff_detail VARCHAR(1000),
+    book_area_id BIGINT NULL,
+    book_status TINYINT NULL,
+    book_tag_ids VARCHAR(500),
+    book_tag_names VARCHAR(1000),
+    actual_area_id BIGINT NULL,
+    actual_status TINYINT NULL,
+    actual_tag_ids VARCHAR(500),
+    actual_tag_names VARCHAR(1000),
+    check_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    handle_opinion VARCHAR(1000),
+    confirmed_by VARCHAR(100),
+    confirmed_at TIMESTAMP NULL,
+    recheck_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stocktake_handle_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    item_id BIGINT NULL,
+    handle_action VARCHAR(20) NOT NULL,
+    opinion VARCHAR(1000),
+    operator VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

@@ -74,3 +74,15 @@ export const dashboardApi = {
     }
   })
 }
+
+export const stocktakeApi = {
+  createBatch: data => request.post('/stocktake/batch', data),
+  listBatches: () => request.get('/stocktake/batch'),
+  getBatch: id => request.get(`/stocktake/batch/${id}`),
+  submitActuals: (id, data) => request.post(`/stocktake/batch/${id}/submit`, data),
+  confirmItem: (batchId, itemId, data) =>
+    request.post(`/stocktake/batch/${batchId}/item/${itemId}/confirm`, data),
+  recheckItem: (batchId, itemId, data) =>
+    request.post(`/stocktake/batch/${batchId}/item/${itemId}/recheck`, data),
+  completeBatch: (id, data) => request.post(`/stocktake/batch/${id}/complete`, data)
+}
