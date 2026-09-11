@@ -25,7 +25,7 @@ public class StocktakeBatch {
     @TableField("area_id")
     private Long areaId;
 
-    /** 应盘数量：盘点分区内在册桌椅数（含停用），以本次录入实盘时的在册快照为准 */
+    /** 应盘数量：建批时按盘点分区内在册桌椅数（含停用）固化，提交实盘不重算，列表/详情/比对共用 */
     @TableField("expected_count")
     private Integer expectedCount;
 

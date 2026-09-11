@@ -83,10 +83,14 @@ public class StocktakeServiceImpl implements StocktakeService {
                     + "，请先完成后再发起盘点");
         }
 
+        // 应盘基数在建批时即按分区在册桌椅数（含停用）固化，列表/详情/后续比对共用同一基数，
+        // 不再等到提交实盘时才写入，避免管理员把"未录入"与"分区无在册桌椅"混淆
+        int expectedCount = countAreaBookedAssets(area.getId());
+
         StocktakeBatch batch = new StocktakeBatch();
         batch.setBatchNo(generateBatchNo());
         batch.setAreaId(area.getId());
-        batch.setExpectedCount(0);
+        batch.setExpectedCount(expectedCount);
         batch.setActualCount(0);
         batch.setCheckedCount(0);
         batch.setDiffCount(0);
@@ -172,9 +176,8 @@ public class StocktakeServiceImpl implements StocktakeService {
             newItems.add(item);
         }
 
-        // 2) 在册但本次未盘到 => 缺失（以盘点分区在册资产为应盘范围）
-        List<DeskChair> expected = deskChairMapper.selectList(
-                new LambdaQueryWrapper<DeskChair>().eq(DeskChair::getAreaId, batch.getAreaId()));
+        // 2) 在册但本次未盘到 => 缺失（应盘范围与建批基数同为该分区在册资产，含停用）
+        List<DeskChair> expected = listAreaBookedAssets(batch.getAreaId());
         for (DeskChair book : expected) {
             String code = normalizeCode(book.getAssetCode());
             if (matchedCodes.contains(code)) {
@@ -202,7 +205,8 @@ public class StocktakeServiceImpl implements StocktakeService {
                 .comparing((StocktakeItem i) -> StocktakeItem.DIFF_MATCH.equals(i.getDiffType()))
                 .thenComparing(StocktakeItem::getAssetCode));
 
-        int expectedCount = expected.size();
+        // 应盘数量沿用建批时固化的基数，提交/重新录入均不重算、不覆盖
+        int expectedCount = batch.getExpectedCount() == null ? 0 : batch.getExpectedCount();
         int actualCount = lineMap.size();
         int diffCount = (int) newItems.stream()
                 .filter(i -> !StocktakeItem.DIFF_MATCH.equals(i.getDiffType())).count();
@@ -213,7 +217,7 @@ public class StocktakeServiceImpl implements StocktakeService {
             recordMapper.deleteItemRecordsByBatchId(batch.getId());
             newItems.forEach(itemMapper::insert);
 
-            batch.setExpectedCount(expectedCount);
+            // 应盘基数建批时已固化，此处只更新实盘/已核/差异，不重写 expectedCount
             batch.setActualCount(actualCount);
             batch.setCheckedCount(0);
             batch.setDiffCount(diffCount);
@@ -433,6 +437,21 @@ public class StocktakeServiceImpl implements StocktakeService {
     }
 
     // ==================== 公共校验与工具 ====================
+
+    /**
+     * 盘点分区在册桌椅全集（含停用），建批应盘基数与提交时缺失项生成共用同一口径。
+     */
+    private List<DeskChair> listAreaBookedAssets(Long areaId) {
+        return deskChairMapper.selectList(
+                new LambdaQueryWrapper<DeskChair>().eq(DeskChair::getAreaId, areaId));
+    }
+
+    /**
+     * 盘点分区在册桌椅数（含停用），作为建批时固化的应盘基数。
+     */
+    private int countAreaBookedAssets(Long areaId) {
+        return listAreaBookedAssets(areaId).size();
+    }
 
     private StocktakeBatch requireBatch(Long batchId) {
         if (batchId == null) {

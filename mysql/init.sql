@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS stocktake_batch (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     batch_no VARCHAR(40) NOT NULL UNIQUE,
     area_id BIGINT NOT NULL,
-    expected_count INT NOT NULL DEFAULT 0 COMMENT '应盘数量：分区内在册桌椅数（含停用）',
+    expected_count INT NOT NULL DEFAULT 0 COMMENT '应盘数量：建批时按分区内在册桌椅数（含停用）固化',
     actual_count INT NOT NULL DEFAULT 0 COMMENT '实盘数量：本次录入/导入唯一资产条数',
     checked_count INT NOT NULL DEFAULT 0 COMMENT '已核数量：已逐项确认的明细数',
     diff_count INT NOT NULL DEFAULT 0 COMMENT '差异数量：非一致明细数',
