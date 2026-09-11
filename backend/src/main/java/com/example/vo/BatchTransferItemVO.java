@@ -24,4 +24,9 @@ public class BatchTransferItemVO {
     private String errorMessage;
 
     private String status;
+
+    /**
+     * 不可迁移原因码：NOT_FOUND（资产已删除）/ DISABLED（资产已停用）/ ALREADY_IN_TARGET（已在目标分区）
+     */
+    private String reasonCode;
 }

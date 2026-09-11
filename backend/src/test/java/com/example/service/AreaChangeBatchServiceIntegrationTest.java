@@ -255,4 +255,141 @@ class AreaChangeBatchServiceIntegrationTest {
         List<DeskChair> byBoth = deskChairService.search(area1, Arrays.asList(999L));
         assertEquals(0, byBoth.size());
     }
+
+    @Test
+    void previewShouldDeduplicateRepeatedSelectionsAcrossFilters() {
+        // 模拟前端跨筛选重复勾选同一批资产
+        List<Long> ids = idsInArea1();
+        List<Long> repeatedIds = new java.util.ArrayList<>(ids);
+        repeatedIds.addAll(ids);
+
+        BatchTransferPreviewVO preview = areaChangeBatchService.preview(
+                request(repeatedIds, area3, null, null));
+
+        assertEquals(4, preview.getSelectedCount());
+        assertEquals(4, preview.getMoveCount());
+        assertEquals(0, preview.getInvalidCount());
+        assertEquals(4, preview.getItems().size());
+        assertTrue(preview.getCanSubmit());
+    }
+
+    @Test
+    void previewShouldReportDeletedDisabledAndAlreadyInTargetAssetsItemByItem() {
+        List<Long> ids = new java.util.ArrayList<>(idsInArea1());
+        Long deletedId = ids.get(0);
+        Long disabledId = ids.get(1);
+        Long readyId = ids.get(2);
+        Long alreadyId = ids.get(3);
+
+        deskChairMapper.deleteById(deletedId);
+        DeskChair disabled = deskChairMapper.selectById(disabledId);
+        disabled.setStatus(0);
+        deskChairMapper.updateById(disabled);
+        // alreadyId 先迁到 area3，再勾选 area3 作为目标，形成“已在目标分区”；readyId 保持可迁移
+        DeskChair already = deskChairMapper.selectById(alreadyId);
+        already.setAreaId(area3);
+        deskChairMapper.updateById(already);
+
+        BatchTransferPreviewVO preview = areaChangeBatchService.preview(
+                request(ids, area3, null, null));
+
+        assertEquals(4, preview.getSelectedCount());
+        assertEquals(1, preview.getMoveCount());
+        assertEquals(3, preview.getInvalidCount());
+        assertEquals(1, preview.getAlreadyInTargetCount());
+        assertFalse(preview.getCanSubmit());
+
+        java.util.Map<Long, com.example.vo.BatchTransferItemVO> itemMap = preview.getItems().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        com.example.vo.BatchTransferItemVO::getDeskChairId, item -> item));
+
+        com.example.vo.BatchTransferItemVO deletedItem = itemMap.get(deletedId);
+        assertFalse(deletedItem.getValid());
+        assertEquals("NOT_FOUND", deletedItem.getReasonCode());
+        assertTrue(deletedItem.getErrorMessage().contains("不存在") || deletedItem.getErrorMessage().contains("删除"));
+
+        com.example.vo.BatchTransferItemVO disabledItem = itemMap.get(disabledId);
+        assertFalse(disabledItem.getValid());
+        assertEquals("DISABLED", disabledItem.getReasonCode());
+        assertEquals("资产已停用，无法调区", disabledItem.getErrorMessage());
+        assertEquals("DC002", disabledItem.getAssetCode());
+
+        com.example.vo.BatchTransferItemVO readyItem = itemMap.get(readyId);
+        assertTrue(readyItem.getValid());
+        assertEquals("READY", readyItem.getStatus());
+
+        com.example.vo.BatchTransferItemVO alreadyItem = itemMap.get(alreadyId);
+        assertFalse(alreadyItem.getValid());
+        assertEquals("ALREADY_IN_TARGET", alreadyItem.getReasonCode());
+        assertEquals("已在目标分区，无需迁移", alreadyItem.getErrorMessage());
+    }
+
+    @Test
+    void executeShouldDeduplicateRepeatedIdsAndMoveEachAssetOnce() {
+        List<Long> ids = idsInArea1();
+        List<Long> repeatedIds = new java.util.ArrayList<>(ids);
+        repeatedIds.addAll(ids);
+        repeatedIds.add(ids.get(0));
+
+        BatchTransferResultVO result = areaChangeBatchService.execute(
+                request(repeatedIds, area3, "重复勾选提交", "赵六"));
+
+        assertEquals("SUCCESS", result.getStatus());
+        // 批次数量按去重后的唯一资产统计，与界面“已勾选”数量一致
+        assertEquals(4, result.getTotalCount());
+        assertEquals(4, result.getSuccessCount());
+        assertEquals(0, result.getFailCount());
+        assertEquals(4, result.getItems().size());
+        long distinctItems = result.getItems().stream()
+                .map(com.example.vo.BatchTransferItemVO::getDeskChairId).distinct().count();
+        assertEquals(4, distinctItems);
+
+        ids.forEach(id -> assertEquals(area3, deskChairMapper.selectById(id).getAreaId()));
+        int logCount = areaChangeLogMapper.findByBatchNoFromTable00(result.getBatchNo()).size()
+                + areaChangeLogMapper.findByBatchNoFromTable01(result.getBatchNo()).size();
+        assertEquals(4, logCount);
+    }
+
+    @Test
+    void executeShouldRejectInvalidAssetsItemByItemAndRollbackAllMoves() {
+        List<Long> validIds = new java.util.ArrayList<>(idsInArea1());
+        Long deletedId = validIds.remove(0);
+        Long disabledId = validIds.remove(0);
+
+        deskChairMapper.deleteById(deletedId);
+        DeskChair disabled = deskChairMapper.selectById(disabledId);
+        disabled.setStatus(0);
+        deskChairMapper.updateById(disabled);
+
+        List<Long> submitIds = new java.util.ArrayList<>(validIds);
+        submitIds.add(deletedId);
+        submitIds.add(disabledId);
+
+        BatchTransferResultVO result = areaChangeBatchService.execute(
+                request(submitIds, area3, "含失效资产提交", "孙七"));
+
+        assertEquals("FAILED", result.getStatus());
+        // 整批数量覆盖全部唯一勾选，逐项给出原因
+        assertEquals(4, result.getTotalCount());
+        assertEquals(0, result.getSuccessCount());
+        assertEquals(4, result.getFailCount());
+
+        java.util.Map<Long, String> messages = result.getItems().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        com.example.vo.BatchTransferItemVO::getDeskChairId,
+                        com.example.vo.BatchTransferItemVO::getErrorMessage));
+        assertTrue(messages.get(deletedId).contains("不存在") || messages.get(deletedId).contains("删除"));
+        assertEquals("资产已停用，无法调区", messages.get(disabledId));
+        // 本可迁移的两张资产随整批未执行，逐项标明是“随批跳过”，而不是资产本身失效
+        validIds.forEach(id ->
+                assertEquals("整批含不可迁移资产，未执行迁移", messages.get(id)));
+        // 存在有效资产也不允许部分迁移：所有资产均保持原归属，整批回滚
+        validIds.forEach(id -> assertEquals(area1, deskChairMapper.selectById(id).getAreaId()));
+        assertEquals(0, areaChangeLogMapper.findAllFromTable00().size()
+                + areaChangeLogMapper.findAllFromTable01().size());
+
+        // 明细中失效资产仍可追溯（已删除资产无资产编号，但保留 ID）
+        AreaChangeBatch stored = areaChangeBatchService.findById(result.getBatchId());
+        assertEquals(4, stored.getItems().size());
+    }
 }

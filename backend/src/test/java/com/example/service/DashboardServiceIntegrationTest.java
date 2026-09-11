@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.entity.AreaChangeLog;
 import com.example.entity.DeskChair;
 import com.example.entity.ReadingArea;
+import com.example.entity.Tag;
 import com.example.mapper.AreaChangeLogMapper;
 import com.example.mapper.DeskChairMapper;
 import com.example.mapper.ReadingAreaMapper;

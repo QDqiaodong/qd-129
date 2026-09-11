@@ -35,6 +35,16 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
     private static final int MAX_BATCH_SIZE = 500;
     private static final DateTimeFormatter BATCH_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
+    /** 不可迁移原因码 */
+    private static final String REASON_NOT_FOUND = "NOT_FOUND";
+    private static final String REASON_DISABLED = "DISABLED";
+    private static final String REASON_ALREADY_IN_TARGET = "ALREADY_IN_TARGET";
+
+    private static final String MESSAGE_NOT_FOUND = "资产不存在或已删除";
+    private static final String MESSAGE_DISABLED = "资产已停用，无法调区";
+    private static final String MESSAGE_ALREADY_IN_TARGET = "已在目标分区，无需迁移";
+    private static final String MESSAGE_SKIPPED_BY_BATCH = "整批含不可迁移资产，未执行迁移";
+
     @Autowired
     private AreaChangeBatchMapper areaChangeBatchMapper;
 
@@ -59,15 +69,12 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
     @Override
     public BatchTransferPreviewVO preview(BatchTransferRequest request) {
         ReadingArea targetArea = validateTargetArea(request.getTargetAreaId());
-        List<Long> deskChairIds = normalizeIds(request.getDeskChairIds());
+        ValidationSnapshot snapshot = validateSelection(normalizeIds(request.getDeskChairIds()), targetArea);
 
-        List<BatchTransferItemVO> itemVOs = buildPreviewItems(deskChairIds, targetArea);
-        int moveCount = (int) itemVOs.stream().filter(BatchTransferItemVO::getValid).count();
-        int invalidCount = itemVOs.size() - moveCount;
-        int alreadyInTargetCount = (int) itemVOs.stream()
-                .filter(item -> Boolean.FALSE.equals(item.getValid())
-                        && "ALREADY_IN_TARGET".equals(item.getStatus()))
-                .count();
+        List<BatchTransferItemVO> itemVOs = buildPreviewItems(snapshot, targetArea);
+        int moveCount = snapshot.validIds.size();
+        int invalidCount = snapshot.invalidReasons.size();
+        int alreadyInTargetCount = countReasons(snapshot, REASON_ALREADY_IN_TARGET);
 
         BatchTransferPreviewVO vo = new BatchTransferPreviewVO();
         vo.setTargetAreaId(targetArea.getId());
@@ -86,39 +93,24 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
         String changeReason = requireText(request.getChangeReason(), "变更原因不能为空");
         String operator = requireText(request.getOperator(), "操作人不能为空");
         ReadingArea targetArea = validateTargetArea(request.getTargetAreaId());
-        List<Long> deskChairIds = normalizeIds(request.getDeskChairIds());
-
-        // 执行前快照校验，按去重后的勾选顺序保留每张桌椅的原归属
-        Map<Long, DeskChair> snapshot = new LinkedHashMap<>();
-        Map<Long, String> businessErrors = new LinkedHashMap<>();
-        for (Long id : deskChairIds) {
-            DeskChair deskChair = deskChairMapper.selectById(id);
-            if (deskChair == null || deskChair.getStatus() == null || deskChair.getStatus() != 1) {
-                businessErrors.put(id, "资产不存在或已停用");
-                continue;
-            }
-            if (targetArea.getId().equals(deskChair.getAreaId())) {
-                businessErrors.put(id, "ALREADY_IN_TARGET");
-                continue;
-            }
-            snapshot.put(id, deskChair);
-        }
+        // 预览/执行共用同一份去重与失效校验，保证提交数量与界面提示一致
+        ValidationSnapshot snapshot = validateSelection(normalizeIds(request.getDeskChairIds()), targetArea);
 
         String batchNo = generateBatchNo();
 
-        if (!businessErrors.isEmpty()) {
-            // 存在不可迁移资产：整批不执行，但保留可追溯的失败批次
+        if (!snapshot.invalidReasons.isEmpty()) {
+            // 存在不可迁移资产：整批不执行，但保留可追溯的失败批次，并逐项给出原因
             AreaChangeBatch failedBatch = buildBatchHeader(batchNo, targetArea.getId(),
-                    deskChairIds.size(), changeReason, operator);
+                    snapshot.ids.size(), changeReason, operator);
             List<AreaChangeBatchItem> failedItems = buildItemsForValidationFailure(
-                    failedBatch, deskChairIds, snapshot, businessErrors, targetArea.getId());
+                    failedBatch, snapshot, targetArea.getId());
             persistFailedBatch(failedBatch, failedItems,
-                    "存在 " + businessErrors.size() + " 项不可迁移资产，整批未执行");
+                    "存在 " + snapshot.invalidReasons.size() + " 项不可迁移资产，整批未执行");
             return buildResult(failedBatch.getId());
         }
 
         AreaChangeBatch batch = buildBatchHeader(batchNo, targetArea.getId(),
-                snapshot.size(), changeReason, operator);
+                snapshot.validIds.size(), changeReason, operator);
         List<AreaChangeBatchItem> items = buildItems(batch, snapshot, targetArea.getId());
 
         Long resultBatchId;
@@ -131,7 +123,7 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
                 });
 
                 for (AreaChangeBatchItem item : items) {
-                    DeskChair deskChair = snapshot.get(item.getDeskChairId());
+                    DeskChair deskChair = snapshot.foundDeskChairs.get(item.getDeskChairId());
                     deskChair.setAreaId(targetArea.getId());
                     int affected = deskChairMapper.updateById(deskChair);
                     if (affected != 1) {
@@ -162,7 +154,7 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
         } catch (Exception e) {
             // 事务已整体回滚：另起事务记录失败批次，保证可追溯
             AreaChangeBatch failedBatch = buildBatchHeader(batchNo, targetArea.getId(),
-                    snapshot.size(), changeReason, operator);
+                    snapshot.validIds.size(), changeReason, operator);
             persistFailedBatch(failedBatch,
                     buildItemsForSystemFailure(batchNo, snapshot, targetArea.getId()),
                     truncate("执行异常，整批已回滚：" + e.getMessage()));
@@ -187,32 +179,69 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
         return batch;
     }
 
-    private List<BatchTransferItemVO> buildPreviewItems(List<Long> deskChairIds, ReadingArea targetArea) {
+    /**
+     * 按去重后的勾选顺序做统一快照校验：区分有效资产、已删除资产、已停用资产和已在目标分区的资产。
+     */
+    private ValidationSnapshot validateSelection(List<Long> deskChairIds, ReadingArea targetArea) {
+        ValidationSnapshot snapshot = new ValidationSnapshot();
+        snapshot.ids = deskChairIds;
+        for (Long id : deskChairIds) {
+            DeskChair deskChair = deskChairMapper.selectById(id);
+            if (deskChair == null) {
+                snapshot.invalidReasons.put(id, REASON_NOT_FOUND);
+                continue;
+            }
+            snapshot.foundDeskChairs.put(id, deskChair);
+            if (deskChair.getStatus() == null || deskChair.getStatus() != 1) {
+                snapshot.invalidReasons.put(id, REASON_DISABLED);
+            } else if (targetArea.getId().equals(deskChair.getAreaId())) {
+                snapshot.invalidReasons.put(id, REASON_ALREADY_IN_TARGET);
+            } else {
+                snapshot.validIds.add(id);
+            }
+        }
+        return snapshot;
+    }
+
+    private int countReasons(ValidationSnapshot snapshot, String reasonCode) {
+        return (int) snapshot.invalidReasons.values().stream().filter(reasonCode::equals).count();
+    }
+
+    private List<BatchTransferItemVO> buildPreviewItems(ValidationSnapshot snapshot, ReadingArea targetArea) {
         Map<Long, String> areaNameCache = new LinkedHashMap<>();
         areaNameCache.put(targetArea.getId(), targetArea.getAreaName());
 
         List<BatchTransferItemVO> result = new ArrayList<>();
-        for (Long id : deskChairIds) {
+        for (Long id : snapshot.ids) {
             BatchTransferItemVO itemVO = new BatchTransferItemVO();
             itemVO.setDeskChairId(id);
             itemVO.setNewAreaId(targetArea.getId());
             itemVO.setNewAreaName(targetArea.getAreaName());
 
-            DeskChair deskChair = deskChairMapper.selectById(id);
-            if (deskChair == null || deskChair.getStatus() == null || deskChair.getStatus() != 1) {
-                itemVO.setValid(false);
-                itemVO.setStatus("INVALID");
-                itemVO.setErrorMessage("资产不存在或已停用");
-            } else if (targetArea.getId().equals(deskChair.getAreaId())) {
-                fillDeskChairInfo(itemVO, deskChair, areaNameCache);
-                itemVO.setNewAreaName(itemVO.getOldAreaName());
-                itemVO.setValid(false);
-                itemVO.setStatus("ALREADY_IN_TARGET");
-                itemVO.setErrorMessage("已在目标分区，无需迁移");
-            } else {
+            String reasonCode = snapshot.invalidReasons.get(id);
+            DeskChair deskChair = snapshot.foundDeskChairs.get(id);
+            if (reasonCode == null) {
+                // 当前有效资产：预览与执行只处理这些项
                 fillDeskChairInfo(itemVO, deskChair, areaNameCache);
                 itemVO.setValid(true);
                 itemVO.setStatus("READY");
+            } else if (REASON_NOT_FOUND.equals(reasonCode)) {
+                itemVO.setValid(false);
+                itemVO.setStatus("INVALID");
+                itemVO.setReasonCode(REASON_NOT_FOUND);
+                itemVO.setErrorMessage(MESSAGE_NOT_FOUND);
+            } else {
+                // 已停用或已在目标分区的资产仍展示其当前归属，便于逐项核对
+                fillDeskChairInfo(itemVO, deskChair, areaNameCache);
+                itemVO.setValid(false);
+                itemVO.setStatus("INVALID");
+                itemVO.setReasonCode(reasonCode);
+                if (REASON_DISABLED.equals(reasonCode)) {
+                    itemVO.setErrorMessage(MESSAGE_DISABLED);
+                } else {
+                    itemVO.setNewAreaName(itemVO.getOldAreaName());
+                    itemVO.setErrorMessage(MESSAGE_ALREADY_IN_TARGET);
+                }
             }
             result.add(itemVO);
         }
@@ -248,7 +277,12 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
         if (rawIds == null || rawIds.isEmpty()) {
             throw new IllegalArgumentException("请至少勾选一张桌椅");
         }
-        List<Long> ids = rawIds.stream().distinct().collect(Collectors.toList());
+        // 跨筛选勾选可能产生重复 ID，统一去重，保证批量数量与唯一资产一致
+        List<Long> ids = rawIds.stream().filter(java.util.Objects::nonNull)
+                .distinct().collect(Collectors.toList());
+        if (ids.isEmpty()) {
+            throw new IllegalArgumentException("请至少勾选一张桌椅");
+        }
         if (ids.size() > MAX_BATCH_SIZE) {
             throw new IllegalArgumentException("单次最多迁移 " + MAX_BATCH_SIZE + " 张桌椅");
         }
@@ -278,9 +312,10 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
     }
 
     private List<AreaChangeBatchItem> buildItems(AreaChangeBatch batch,
-                                                 Map<Long, DeskChair> snapshot, Long targetAreaId) {
+                                                 ValidationSnapshot snapshot, Long targetAreaId) {
         List<AreaChangeBatchItem> items = new ArrayList<>();
-        for (DeskChair deskChair : snapshot.values()) {
+        for (Long id : snapshot.validIds) {
+            DeskChair deskChair = snapshot.foundDeskChairs.get(id);
             AreaChangeBatchItem item = new AreaChangeBatchItem();
             item.setBatchNo(batch.getBatchNo());
             item.setDeskChairId(deskChair.getId());
@@ -294,34 +329,33 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
     }
 
     private List<AreaChangeBatchItem> buildItemsForValidationFailure(
-            AreaChangeBatch batch, List<Long> deskChairIds, Map<Long, DeskChair> snapshot,
-            Map<Long, String> businessErrors, Long targetAreaId) {
+            AreaChangeBatch batch, ValidationSnapshot snapshot, Long targetAreaId) {
         List<AreaChangeBatchItem> items = new ArrayList<>();
-        for (Long id : deskChairIds) {
+        for (Long id : snapshot.ids) {
             AreaChangeBatchItem item = new AreaChangeBatchItem();
             item.setBatchNo(batch.getBatchNo());
+            item.setDeskChairId(id);
             item.setNewAreaId(targetAreaId);
+            // 整批未执行，没有一项成功；逐项原因区分真正失效的资产与随批跳过的资产
             item.setStatus(AreaChangeBatchItem.STATUS_FAILED);
-            DeskChair deskChair = snapshot.get(id);
+            DeskChair deskChair = snapshot.foundDeskChairs.get(id);
             if (deskChair != null) {
-                item.setDeskChairId(deskChair.getId());
                 item.setAssetCode(deskChair.getAssetCode());
                 item.setOldAreaId(deskChair.getAreaId());
-            } else {
-                item.setDeskChairId(id);
             }
-            String error = businessErrors.get(id);
-            item.setErrorMessage("ALREADY_IN_TARGET".equals(error)
-                    ? "已在目标分区，无需迁移" : error);
+            item.setErrorMessage(snapshot.invalidReasons.containsKey(id)
+                    ? reasonMessage(snapshot.invalidReasons.get(id))
+                    : MESSAGE_SKIPPED_BY_BATCH);
             items.add(item);
         }
         return items;
     }
 
     private List<AreaChangeBatchItem> buildItemsForSystemFailure(
-            String batchNo, Map<Long, DeskChair> snapshot, Long targetAreaId) {
+            String batchNo, ValidationSnapshot snapshot, Long targetAreaId) {
         List<AreaChangeBatchItem> items = new ArrayList<>();
-        for (DeskChair deskChair : snapshot.values()) {
+        for (Long id : snapshot.validIds) {
+            DeskChair deskChair = snapshot.foundDeskChairs.get(id);
             AreaChangeBatchItem item = new AreaChangeBatchItem();
             item.setBatchNo(batchNo);
             item.setDeskChairId(deskChair.getId());
@@ -333,6 +367,19 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
             items.add(item);
         }
         return items;
+    }
+
+    private String reasonMessage(String reasonCode) {
+        if (REASON_NOT_FOUND.equals(reasonCode)) {
+            return MESSAGE_NOT_FOUND;
+        }
+        if (REASON_DISABLED.equals(reasonCode)) {
+            return MESSAGE_DISABLED;
+        }
+        if (REASON_ALREADY_IN_TARGET.equals(reasonCode)) {
+            return MESSAGE_ALREADY_IN_TARGET;
+        }
+        return "资产不可迁移";
     }
 
     private void persistFailedBatch(AreaChangeBatch batch, List<AreaChangeBatchItem> items, String errorMessage) {
@@ -396,5 +443,16 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
             return null;
         }
         return text.length() > 1000 ? text.substring(0, 1000) : text;
+    }
+
+    /**
+     * 一次批量请求的校验快照：ids 为去重后的全部勾选，validIds 为当前仍有效的资产，
+     * foundDeskChairs 缓存仍能查到的资产，invalidReasons 按资产逐项记录不可迁移原因码。
+     */
+    private static class ValidationSnapshot {
+        private List<Long> ids = new ArrayList<>();
+        private final List<Long> validIds = new ArrayList<>();
+        private final Map<Long, DeskChair> foundDeskChairs = new LinkedHashMap<>();
+        private final Map<Long, String> invalidReasons = new LinkedHashMap<>();
     }
 }

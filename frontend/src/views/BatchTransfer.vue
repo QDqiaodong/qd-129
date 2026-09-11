@@ -42,9 +42,10 @@
         :data="deskChairs"
         border
         row-key="id"
-        @selection-change="handleSelectionChange"
+        @select="handleSelect"
+        @select-all="handleSelectAll"
       >
-        <el-table-column type="selection" width="50" reserve-selection />
+        <el-table-column type="selection" width="50" />
         <el-table-column prop="assetCode" label="资产编号" width="110" />
         <el-table-column prop="capacity" label="容纳人数" width="90" />
         <el-table-column prop="areaName" label="当前分区" width="140" />
@@ -143,7 +144,7 @@
           :closable="false"
           show-icon
           class="preview-alert"
-          :title="`有 ${preview.invalidCount} 项不可迁移（资产失效 ${preview.invalidCount - preview.alreadyInTargetCount} 项，已在目标分区 ${preview.alreadyInTargetCount} 项），整批不可提交，请调整勾选`"
+          :title="invalidAlertTitle"
         />
         <el-alert
           type="success"
@@ -300,6 +301,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { deskChairApi, readingAreaApi, tagApi, batchApi } from '../api'
+import { useDeskSelection } from '../composables/useDeskSelection'
+import { summarizeInvalidItems, buildInvalidAlertTitle } from '../utils/previewSummary'
 
 const deskChairs = ref([])
 const readingAreas = ref([])
@@ -307,12 +310,20 @@ const tags = ref([])
 const batches = ref([])
 const deskTableRef = ref()
 
+// 跨筛选保留的唯一资产勾选：切换分区/标签筛选不会丢失，重复勾选只计一次
+const {
+  selectedRows,
+  mergeRows,
+  handleSelect,
+  handleSelectAll,
+  syncTableSelection,
+  clearAllSelection
+} = useDeskSelection(deskTableRef)
+
 const filters = reactive({
   areaId: null,
   tagIds: []
 })
-
-const selectedRows = ref([])
 
 const transferDialogVisible = ref(false)
 const resultDialogVisible = ref(false)
@@ -353,11 +364,24 @@ const ownershipGroups = computed(() => {
   return Object.keys(groups).map(oldAreaName => ({ oldAreaName, count: groups[oldAreaName] }))
 })
 
+// 失效资产逐项汇总，保证红色提示的分类数量与后端返回的逐行结果一致
+const invalidSummary = computed(() =>
+  preview.value ? summarizeInvalidItems(preview.value.items) : null
+)
+
+const invalidAlertTitle = computed(() =>
+  invalidSummary.value ? buildInvalidAlertTitle(invalidSummary.value) : ''
+)
+
 const loadDeskChairs = async () => {
-  deskChairs.value = await deskChairApi.search({
+  const rows = await deskChairApi.search({
     areaId: filters.areaId,
     tagIds: filters.tagIds
   })
+  deskChairs.value = rows
+  // 合并最新行数据并把跨筛选保留的勾选回放到当前页
+  mergeRows(rows)
+  await syncTableSelection()
 }
 
 const loadAreas = async () => {
@@ -382,12 +406,9 @@ const resetFilter = async () => {
   await loadDeskChairs()
 }
 
-const handleSelectionChange = rows => {
-  selectedRows.value = rows
-}
-
 const clearSelection = () => {
-  deskTableRef.value?.clearSelection()
+  // 一次清除所有筛选条件下累积的勾选，而不只是当前页
+  clearAllSelection()
 }
 
 const openTransferDialog = async () => {
@@ -408,7 +429,8 @@ const handleTransferClosed = () => {
 }
 
 const buildPayload = () => ({
-  deskChairIds: selectedRows.value.map(row => row.id),
+  // 跨筛选勾选以资产 ID 去重，保证提交数量与界面“已勾选”数量一致
+  deskChairIds: [...new Set(selectedRows.value.map(row => row.id))],
   targetAreaId: transferForm.targetAreaId,
   changeReason: transferForm.changeReason,
   operator: transferForm.operator
