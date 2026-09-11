@@ -55,6 +55,13 @@ public class DeskChairServiceImpl implements DeskChairService {
     }
 
     @Override
+    public List<DeskChair> findAllIncludeDisabled() {
+        List<DeskChair> list = deskChairMapper.findAllWithAreaIncludeDisabled();
+        list.forEach(this::loadTags);
+        return list;
+    }
+
+    @Override
     public List<DeskChair> findByAreaId(Long areaId) {
         List<DeskChair> list = deskChairMapper.findByAreaId(areaId);
         list.forEach(this::loadTags);

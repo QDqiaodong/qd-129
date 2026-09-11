@@ -14,6 +14,9 @@ public interface DeskChairMapper extends BaseMapper<DeskChair> {
     @Select("SELECT dc.*, ra.area_name FROM desk_chair dc LEFT JOIN reading_area ra ON dc.area_id = ra.id WHERE dc.status = 1")
     List<DeskChair> findAllWithArea();
 
+    @Select("SELECT dc.*, ra.area_name FROM desk_chair dc LEFT JOIN reading_area ra ON dc.area_id = ra.id ORDER BY dc.area_id, dc.asset_code")
+    List<DeskChair> findAllWithAreaIncludeDisabled();
+
     @Select("SELECT dc.*, ra.area_name FROM desk_chair dc LEFT JOIN reading_area ra ON dc.area_id = ra.id WHERE dc.area_id = #{areaId} AND dc.status = 1")
     List<DeskChair> findByAreaId(@Param("areaId") Long areaId);
 

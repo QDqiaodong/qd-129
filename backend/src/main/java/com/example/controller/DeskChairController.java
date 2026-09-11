@@ -18,8 +18,11 @@ public class DeskChairController {
     private DeskChairService deskChairService;
 
     @GetMapping
-    public ResponseEntity<List<DeskChair>> getAll() {
-        return ResponseEntity.ok(deskChairService.findAll());
+    public ResponseEntity<List<DeskChair>> getAll(@RequestParam(required = false, defaultValue = "false")
+                                                      Boolean includeDisabled) {
+        return ResponseEntity.ok(Boolean.TRUE.equals(includeDisabled)
+                ? deskChairService.findAllIncludeDisabled()
+                : deskChairService.findAll());
     }
 
     @GetMapping("/area/{areaId}")

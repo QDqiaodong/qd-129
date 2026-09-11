@@ -139,3 +139,27 @@ CREATE TABLE IF NOT EXISTS stocktake_handle_record (
     operator VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS repair_order (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_no VARCHAR(40) NOT NULL UNIQUE,
+    desk_chair_id BIGINT NOT NULL,
+    area_id BIGINT NOT NULL,
+    damage_part VARCHAR(100) NOT NULL,
+    urgency VARCHAR(10) NOT NULL,
+    phenomenon VARCHAR(1000) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    reporter VARCHAR(100) NOT NULL,
+    repairer VARCHAR(100) NULL,
+    accept_at TIMESTAMP NULL,
+    finish_at TIMESTAMP NULL,
+    repair_note VARCHAR(1000) NULL,
+    desk_status_after TINYINT NULL,
+    handled_by VARCHAR(100) NULL,
+    handled_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_repair_area_status ON repair_order (area_id, status);
+CREATE INDEX IF NOT EXISTS idx_repair_desk_chair ON repair_order (desk_chair_id);
+CREATE INDEX IF NOT EXISTS idx_repair_status ON repair_order (status);

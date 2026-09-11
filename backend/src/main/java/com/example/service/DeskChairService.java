@@ -8,6 +8,9 @@ public interface DeskChairService {
 
     List<DeskChair> findAll();
 
+    /** 含停用桌椅，供报修等场景选择 */
+    List<DeskChair> findAllIncludeDisabled();
+
     List<DeskChair> findByAreaId(Long areaId);
 
     List<DeskChair> findByTagId(Long tagId);

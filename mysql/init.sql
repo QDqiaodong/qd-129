@@ -120,6 +120,32 @@ CREATE TABLE IF NOT EXISTS stocktake_batch (
     INDEX idx_area_status (area_id, status)
 );
 
+CREATE TABLE IF NOT EXISTS repair_order (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_no VARCHAR(40) NOT NULL UNIQUE COMMENT '报修单号 BX+时间戳+随机串',
+    desk_chair_id BIGINT NOT NULL,
+    area_id BIGINT NOT NULL COMMENT '报修时所属分区快照',
+    damage_part VARCHAR(100) NOT NULL COMMENT '损坏部位，如桌面/椅腿',
+    urgency VARCHAR(10) NOT NULL COMMENT 'LOW/NORMAL/HIGH/URGENT 紧急程度',
+    phenomenon VARCHAR(1000) NOT NULL COMMENT '损坏现象描述',
+    status VARCHAR(20) NOT NULL COMMENT 'PENDING待接单/IN_PROGRESS维修中/FIXED已修复/UNFIXABLE无法修复',
+    reporter VARCHAR(100) NOT NULL COMMENT '报修人',
+    repairer VARCHAR(100) NULL COMMENT '接单处理人',
+    accept_at DATETIME NULL COMMENT '接单时间',
+    finish_at DATETIME NULL COMMENT '修复/判定无法修复时间',
+    repair_note VARCHAR(1000) NULL COMMENT '维修说明/无法修复原因',
+    desk_status_after TINYINT NULL COMMENT '闭环后处置：1恢复可用/0转停用',
+    handled_by VARCHAR(100) NULL COMMENT '恢复/停用处置人',
+    handled_at DATETIME NULL COMMENT '处置时间',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (desk_chair_id) REFERENCES desk_chair(id),
+    FOREIGN KEY (area_id) REFERENCES reading_area(id),
+    INDEX idx_area_status (area_id, status),
+    INDEX idx_desk_chair_id (desk_chair_id),
+    INDEX idx_status (status)
+);
+
 CREATE TABLE IF NOT EXISTS stocktake_item (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     batch_id BIGINT NOT NULL,
