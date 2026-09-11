@@ -29,7 +29,7 @@
       </el-col>
     </el-row>
 
-    <el-dialog :visible.sync="dialogVisible" :title="isEdit ? '编辑分区' : '添加分区'" width="500px">
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑分区' : '添加分区'" width="500px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="分区编码">
           <el-input v-model="form.areaCode" placeholder="请输入分区编码" />
@@ -52,6 +52,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { readingAreaApi } from '../api'
 
 const readingAreas = ref([])
@@ -81,25 +82,37 @@ const openEditModal = (area) => {
 }
 
 const handleSubmit = async () => {
-  if (isEdit.value) {
-    await readingAreaApi.update(form.value)
-  } else {
-    await readingAreaApi.create(form.value)
+  try {
+    if (isEdit.value) {
+      await readingAreaApi.update(form.value)
+    } else {
+      await readingAreaApi.create(form.value)
+    }
+    dialogVisible.value = false
+    await loadData()
+    ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
+  } catch (e) {
+    ElMessage.error(e.message || (isEdit.value ? '更新失败' : '添加失败'))
   }
-  dialogVisible.value = false
-  await loadData()
-  ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
 }
 
 const handleDelete = async (id) => {
-  await ElMessageBox.confirm('确定要删除该分区吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  })
-  await readingAreaApi.delete(id)
-  await loadData()
-  ElMessage.success('删除成功')
+  try {
+    await ElMessageBox.confirm('确定要删除该分区吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await readingAreaApi.delete(id)
+    await loadData()
+    ElMessage.success('删除成功')
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
 }
 
 onMounted(loadData)

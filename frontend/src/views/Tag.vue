@@ -28,7 +28,7 @@
       </el-col>
     </el-row>
 
-    <el-dialog :visible.sync="dialogVisible" :title="isEdit ? '编辑标签' : '添加标签'" width="500px">
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑标签' : '添加标签'" width="500px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="标签编码">
           <el-input v-model="form.tagCode" placeholder="请输入标签编码" />
@@ -54,6 +54,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { tagApi } from '../api'
 
 const tags = ref([])
@@ -84,25 +85,37 @@ const openEditModal = (tag) => {
 }
 
 const handleSubmit = async () => {
-  if (isEdit.value) {
-    await tagApi.update(form.value)
-  } else {
-    await tagApi.create(form.value)
+  try {
+    if (isEdit.value) {
+      await tagApi.update(form.value)
+    } else {
+      await tagApi.create(form.value)
+    }
+    dialogVisible.value = false
+    await loadData()
+    ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
+  } catch (e) {
+    ElMessage.error(e.message || (isEdit.value ? '更新失败' : '添加失败'))
   }
-  dialogVisible.value = false
-  await loadData()
-  ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
 }
 
 const handleDelete = async (id) => {
-  await ElMessageBox.confirm('确定要删除该标签吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  })
-  await tagApi.delete(id)
-  await loadData()
-  ElMessage.success('删除成功')
+  try {
+    await ElMessageBox.confirm('确定要删除该标签吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await tagApi.delete(id)
+    await loadData()
+    ElMessage.success('删除成功')
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
 }
 
 onMounted(loadData)

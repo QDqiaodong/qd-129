@@ -54,7 +54,7 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog :visible.sync="dialogVisible" :title="isEdit ? '编辑桌椅' : '添加桌椅'" width="500px">
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑桌椅' : '添加桌椅'" width="500px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="资产编号">
           <el-input v-model="form.assetCode" placeholder="请输入资产编号" />
@@ -77,7 +77,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog :visible.sync="tagDialogVisible" title="编辑标签" width="500px">
+    <el-dialog v-model="tagDialogVisible" title="编辑标签" width="500px">
       <div class="tag-list">
         <div class="tag-item" v-for="tag in tags" :key="tag.id">
           <el-checkbox
@@ -95,7 +95,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog :visible.sync="areaDialogVisible" title="调整分区" width="500px">
+    <el-dialog v-model="areaDialogVisible" title="调整分区" width="500px">
       <el-form :model="areaForm" label-width="100px">
         <el-form-item label="当前分区">
           <el-input :value="currentAreaName" disabled />
@@ -123,6 +123,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { deskChairApi, readingAreaApi, tagApi } from '../api'
 
 const deskChairs = ref([])
@@ -200,25 +201,37 @@ const openEditModal = (row) => {
 }
 
 const handleSubmit = async () => {
-  if (isEdit.value) {
-    await deskChairApi.update(form.value)
-  } else {
-    await deskChairApi.create(form.value)
+  try {
+    if (isEdit.value) {
+      await deskChairApi.update(form.value)
+    } else {
+      await deskChairApi.create(form.value)
+    }
+    dialogVisible.value = false
+    await loadData()
+    ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
+  } catch (e) {
+    ElMessage.error(e.message || (isEdit.value ? '更新失败' : '添加失败'))
   }
-  dialogVisible.value = false
-  await loadData()
-  ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
 }
 
 const handleDelete = async (id) => {
-  await ElMessageBox.confirm('确定要删除该桌椅吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  })
-  await deskChairApi.delete(id)
-  await loadData()
-  ElMessage.success('删除成功')
+  try {
+    await ElMessageBox.confirm('确定要删除该桌椅吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await deskChairApi.delete(id)
+    await loadData()
+    ElMessage.success('删除成功')
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
 }
 
 const openTagModal = (row) => {
@@ -237,10 +250,14 @@ const toggleTag = (tagId) => {
 }
 
 const handleSaveTags = async () => {
-  await deskChairApi.bindTags(currentDeskChair.value.id, selectedTagIds.value)
-  tagDialogVisible.value = false
-  await loadData()
-  ElMessage.success('标签更新成功')
+  try {
+    await deskChairApi.bindTags(currentDeskChair.value.id, selectedTagIds.value)
+    tagDialogVisible.value = false
+    await loadData()
+    ElMessage.success('标签更新成功')
+  } catch (e) {
+    ElMessage.error(e.message || '标签更新失败')
+  }
 }
 
 const openUpdateAreaModal = (row) => {
@@ -250,14 +267,18 @@ const openUpdateAreaModal = (row) => {
 }
 
 const handleUpdateArea = async () => {
-  await deskChairApi.updateArea(currentDeskChair.value.id, {
-    newAreaId: areaForm.value.newAreaId,
-    changeReason: areaForm.value.changeReason,
-    operator: areaForm.value.operator
-  })
-  areaDialogVisible.value = false
-  await loadData()
-  ElMessage.success('分区调整成功')
+  try {
+    await deskChairApi.updateArea(currentDeskChair.value.id, {
+      newAreaId: areaForm.value.newAreaId,
+      changeReason: areaForm.value.changeReason,
+      operator: areaForm.value.operator
+    })
+    areaDialogVisible.value = false
+    await loadData()
+    ElMessage.success('分区调整成功')
+  } catch (e) {
+    ElMessage.error(e.message || '分区调整失败')
+  }
 }
 
 onMounted(() => {
