@@ -37,6 +37,10 @@
           <el-icon><Finished /></el-icon>
           <span>桌椅盘点</span>
         </el-menu-item>
+        <el-menu-item index="/seat-hold">
+          <el-icon><Clock /></el-icon>
+          <span>高峰占座</span>
+        </el-menu-item>
       </el-menu>
     </aside>
     <main class="main-content">
@@ -48,7 +52,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Location, Grid, PriceTag, Document, Switch, DataAnalysis, Finished } from '@element-plus/icons-vue'
+import { Location, Grid, PriceTag, Document, Switch, DataAnalysis, Finished, Clock } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

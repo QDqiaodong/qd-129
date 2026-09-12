@@ -187,6 +187,48 @@ CREATE TABLE IF NOT EXISTS stocktake_handle_record (
     INDEX idx_item_id (item_id)
 );
 
+CREATE TABLE IF NOT EXISTS seat_hold_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no VARCHAR(40) NOT NULL UNIQUE COMMENT '占座批次号 ZZ+时间戳+随机串',
+    area_id BIGINT NOT NULL COMMENT '值班员开批时选定的阅览分区',
+    time_slot VARCHAR(100) NOT NULL COMMENT '高峰时段，如 08:00-11:30 / 午间高峰',
+    total_count INT NOT NULL DEFAULT 0 COMMENT '本批勾选占住的资产总数',
+    held_count INT NOT NULL DEFAULT 0 COMMENT '在占数量：明细状态 HOLDING',
+    timeout_count INT NOT NULL DEFAULT 0 COMMENT '超时未到数量：明细状态 TIMEOUT',
+    released_count INT NOT NULL DEFAULT 0 COMMENT '已释放数量：明细状态 RELEASED',
+    remark VARCHAR(500),
+    operator VARCHAR(100) NOT NULL COMMENT '开批值班员',
+    status VARCHAR(20) NOT NULL COMMENT 'OPEN进行中/ENDED已结束',
+    ended_at DATETIME NULL COMMENT '整批结束时间',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (area_id) REFERENCES reading_area(id),
+    INDEX idx_area_status (area_id, status),
+    INDEX idx_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS seat_hold_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    batch_no VARCHAR(40) NOT NULL,
+    desk_chair_id BIGINT NOT NULL,
+    asset_code VARCHAR(50) NOT NULL COMMENT '资产编号快照',
+    area_id BIGINT NOT NULL COMMENT '勾选时所属分区快照',
+    item_status VARCHAR(20) NOT NULL COMMENT 'HOLDING在占/TIMEOUT超时未到/RELEASED已释放',
+    previous_desk_status TINYINT NOT NULL DEFAULT 1 COMMENT '占住前桌椅启用状态，释放时按此恢复',
+    released_by VARCHAR(100) NULL COMMENT '释放操作人',
+    released_at DATETIME NULL COMMENT '释放时间',
+    timeout_by VARCHAR(100) NULL COMMENT '标记超时未到操作人',
+    timeout_at DATETIME NULL COMMENT '标记超时未到时间',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (batch_id) REFERENCES seat_hold_batch(id),
+    INDEX idx_batch_id (batch_id),
+    INDEX idx_batch_no (batch_no),
+    INDEX idx_desk_chair_id (desk_chair_id),
+    INDEX idx_item_status (item_status)
+);
+
 INSERT INTO reading_area (area_code, area_name, description) VALUES
 ('A001', '第一阅览区', '主馆一层东侧，自然科学类'),
 ('A002', '第二阅览区', '主馆一层西侧，社会科学类'),

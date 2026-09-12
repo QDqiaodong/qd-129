@@ -163,3 +163,42 @@ CREATE TABLE IF NOT EXISTS repair_order (
 CREATE INDEX IF NOT EXISTS idx_repair_area_status ON repair_order (area_id, status);
 CREATE INDEX IF NOT EXISTS idx_repair_desk_chair ON repair_order (desk_chair_id);
 CREATE INDEX IF NOT EXISTS idx_repair_status ON repair_order (status);
+
+CREATE TABLE IF NOT EXISTS seat_hold_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no VARCHAR(40) NOT NULL UNIQUE,
+    area_id BIGINT NOT NULL,
+    time_slot VARCHAR(100) NOT NULL,
+    total_count INT NOT NULL DEFAULT 0,
+    held_count INT NOT NULL DEFAULT 0,
+    timeout_count INT NOT NULL DEFAULT 0,
+    released_count INT NOT NULL DEFAULT 0,
+    remark VARCHAR(500),
+    operator VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    ended_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS seat_hold_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    batch_no VARCHAR(40) NOT NULL,
+    desk_chair_id BIGINT NOT NULL,
+    asset_code VARCHAR(50) NOT NULL,
+    area_id BIGINT NOT NULL,
+    item_status VARCHAR(20) NOT NULL,
+    previous_desk_status TINYINT NOT NULL DEFAULT 1,
+    released_by VARCHAR(100) NULL,
+    released_at TIMESTAMP NULL,
+    timeout_by VARCHAR(100) NULL,
+    timeout_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_seat_hold_batch_area_status ON seat_hold_batch (area_id, status);
+CREATE INDEX IF NOT EXISTS idx_seat_hold_batch_status ON seat_hold_batch (status);
+CREATE INDEX IF NOT EXISTS idx_seat_hold_item_batch_id ON seat_hold_item (batch_id);
+CREATE INDEX IF NOT EXISTS idx_seat_hold_item_desk_chair ON seat_hold_item (desk_chair_id);
+CREATE INDEX IF NOT EXISTS idx_seat_hold_item_status ON seat_hold_item (item_status);

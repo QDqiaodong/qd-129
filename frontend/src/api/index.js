@@ -25,7 +25,9 @@ export const readingAreaApi = {
 }
 
 export const deskChairApi = {
-  getAll: () => request.get('/desk-chair'),
+  getAll: (config = {}) => request.get('/desk-chair', {
+    params: { includeDisabled: config.params?.includeDisabled ? true : undefined }
+  }),
   getByAreaId: areaId => request.get(`/desk-chair/area/${areaId}`),
   getByTagId: tagId => request.get(`/desk-chair/tag/${tagId}`),
   getByTagIds: tagIds => request.get('/desk-chair/tags', { params: { tagIds } }),
@@ -85,4 +87,23 @@ export const stocktakeApi = {
   recheckItem: (batchId, itemId, data) =>
     request.post(`/stocktake/batch/${batchId}/item/${itemId}/recheck`, data),
   completeBatch: (id, data) => request.post(`/stocktake/batch/${id}/complete`, data)
+}
+
+export const seatHoldApi = {
+  createBatch: data => request.post('/seat-hold/batch', data),
+  listBatches: params => request.get('/seat-hold/batch', {
+    params: { areaId: params?.areaId || undefined, status: params?.status || undefined }
+  }),
+  getBatch: id => request.get(`/seat-hold/batch/${id}`),
+  listActiveHolds: areaId => request.get('/seat-hold/active', { params: { areaId: areaId || undefined } }),
+  hold: (id, data) => request.post(`/seat-hold/batch/${id}/hold`, data),
+  release: (batchId, itemId, data) =>
+    request.post(`/seat-hold/batch/${batchId}/item/${itemId}/release`, data),
+  markTimeout: (batchId, itemId, data) =>
+    request.post(`/seat-hold/batch/${batchId}/item/${itemId}/timeout`, data),
+  revertTimeout: (batchId, itemId, data) =>
+    request.post(`/seat-hold/batch/${batchId}/item/${itemId}/revert-timeout`, data),
+  finishBatch: (id, data) => request.post(`/seat-hold/batch/${id}/finish`, data),
+  releaseLegacy: (batchId, itemId, data) =>
+    request.post(`/seat-hold/batch/${batchId}/item/${itemId}/release-legacy`, data)
 }

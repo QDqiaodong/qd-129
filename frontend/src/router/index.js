@@ -39,6 +39,11 @@ const routes = [
     path: '/stocktake',
     name: 'Stocktake',
     component: () => import('../views/Stocktake.vue')
+  },
+  {
+    path: '/seat-hold',
+    name: 'SeatHold',
+    component: () => import('../views/SeatHold.vue')
   }
 ]
 
