@@ -3,9 +3,11 @@ package com.example.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.entity.DeskChair;
 import com.example.entity.ReadingArea;
+import com.example.entity.SeatHoldItem;
 import com.example.mapper.DashboardMapper;
 import com.example.mapper.DeskChairMapper;
 import com.example.mapper.ReadingAreaMapper;
+import com.example.mapper.SeatHoldItemMapper;
 import com.example.mapper.TagMapper;
 import com.example.service.AreaChangeLogService;
 import com.example.service.DashboardService;
@@ -21,8 +23,10 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class DashboardServiceImpl implements DashboardService {
@@ -38,6 +42,9 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Autowired
     private DeskChairMapper deskChairMapper;
+
+    @Autowired
+    private SeatHoldItemMapper seatHoldItemMapper;
 
     @Autowired
     private TagMapper tagMapper;
@@ -80,25 +87,48 @@ public class DashboardServiceImpl implements DashboardService {
                         .eq(DeskChair::getAreaId, areaId)
                         .ge(DeskChair::getStatus, 0)
                         .orderByAsc(DeskChair::getAssetCode));
+
+        // 进行中占座（OPEN 批次的在占/超时未到明细）一次性查出，口径与占座列表、
+        // 批量调区拦截一致；占座占用单独成桶，不与档案停用、报修停用混成一笔
+        Set<Long> occupiedIds = new HashSet<>();
+        if (!deskChairs.isEmpty()) {
+            List<Long> deskChairIds = deskChairs.stream().map(DeskChair::getId).toList();
+            for (SeatHoldItem hold : seatHoldItemMapper.findOpenHoldsByDeskChairIds(deskChairIds)) {
+                occupiedIds.add(hold.getDeskChairId());
+            }
+        }
+
         int total = deskChairs.size();
         int available = 0;
+        int occupied = 0;
         int disabled = 0;
         int totalCapacity = 0;
+        int occupiedCapacity = 0;
         for (DeskChair deskChair : deskChairs) {
             deskChair.setAreaName(area.getAreaName());
             deskChair.setTags(tagMapper.findByDeskChairId(deskChair.getId()));
-            if (deskChair.getStatus() != null && deskChair.getStatus() == 1) {
-                available++;
-                totalCapacity += deskChair.getCapacity() == null ? 0 : deskChair.getCapacity();
+            int capacity = deskChair.getCapacity() == null ? 0 : deskChair.getCapacity();
+            if (occupiedIds.contains(deskChair.getId())) {
+                deskChair.setOccupied(true);
+                occupied++;
+                occupiedCapacity += capacity;
             } else {
-                disabled++;
+                deskChair.setOccupied(false);
+                if (deskChair.getStatus() != null && deskChair.getStatus() == 1) {
+                    available++;
+                    totalCapacity += capacity;
+                } else {
+                    disabled++;
+                }
             }
         }
         detail.setDeskChairs(deskChairs);
         detail.setTotalCount(total);
         detail.setAvailableCount(available);
+        detail.setOccupiedCount(occupied);
         detail.setDisabledCount(disabled);
         detail.setTotalCapacity(totalCapacity);
+        detail.setOccupiedCapacity(occupiedCapacity);
 
         detail.setTagStats(dashboardMapper.findTagStatsByAreaId(areaId));
         detail.setRecentChanges(areaChangeLogService.findRecentByAreaId(areaId,

@@ -2,9 +2,12 @@ package com.example.service;
 
 import com.example.TestRedisConfig;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.dto.SeatHoldCreateRequest;
+import com.example.dto.SeatHoldHandleRequest;
 import com.example.entity.AreaChangeLog;
 import com.example.entity.DeskChair;
 import com.example.entity.ReadingArea;
+import com.example.entity.SeatHoldBatch;
 import com.example.entity.Tag;
 import com.example.mapper.AreaChangeLogMapper;
 import com.example.mapper.DeskChairMapper;
@@ -37,6 +40,9 @@ class DashboardServiceIntegrationTest {
     private DashboardService dashboardService;
 
     @Autowired
+    private SeatHoldService seatHoldService;
+
+    @Autowired
     private ReadingAreaMapper readingAreaMapper;
 
     @Autowired
@@ -58,6 +64,9 @@ class DashboardServiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.execute("DELETE FROM seat_hold_item");
+        jdbcTemplate.execute("DELETE FROM seat_hold_batch");
+        jdbcTemplate.execute("DELETE FROM repair_order");
         jdbcTemplate.execute("DELETE FROM area_change_log_00");
         jdbcTemplate.execute("DELETE FROM area_change_log_01");
         jdbcTemplate.execute("DELETE FROM desk_chair_tag");
@@ -142,6 +151,82 @@ class DashboardServiceIntegrationTest {
         return stats.stream().collect(Collectors.toMap(AreaCapacityStatVO::getAreaId, s -> s));
     }
 
+    private SeatHoldCreateRequest holdRequest(Long areaId, List<String> assetCodes) {
+        List<Long> ids = assetCodes.stream()
+                .map(code -> deskChairMapper.findByAssetCode(code).getId())
+                .toList();
+        SeatHoldCreateRequest req = new SeatHoldCreateRequest();
+        req.setAreaId(areaId);
+        req.setTimeSlot("08:00-11:30 早高峰");
+        req.setDeskChairIds(ids);
+        req.setOperator("值班员甲");
+        return req;
+    }
+
+    private SeatHoldHandleRequest handle(String operator) {
+        SeatHoldHandleRequest req = new SeatHoldHandleRequest();
+        req.setOperator(operator);
+        return req;
+    }
+
+    @Test
+    void statsShouldSeparateSeatHoldOccupiedFromDisabled() {
+        // 高峰占座：DC001 在占（area1），DC005 标记超时未到（area2）
+        SeatHoldBatch batch1 = seatHoldService.createBatch(holdRequest(area1, List.of("DC001")));
+        SeatHoldBatch batch2 = seatHoldService.createBatch(holdRequest(area2, List.of("DC005")));
+        seatHoldService.markTimeout(batch2.getId(), batch2.getItems().get(0).getId(), handle("值班员乙"));
+
+        Map<Long, AreaCapacityStatVO> stats = statsById(dashboardService.getAreaCapacityStats());
+
+        // area1：在占的 DC001 单独计入占座占用，不再混入停用；档案停用的 DC003 仍在停用
+        AreaCapacityStatVO s1 = stats.get(area1);
+        assertEquals(3, s1.getTotalCount());
+        assertEquals(1, s1.getAvailableCount());
+        assertEquals(1, s1.getOccupiedCount());
+        assertEquals(1, s1.getDisabledCount());
+        assertEquals(4, s1.getTotalCapacity());
+        assertEquals(2, s1.getOccupiedCapacity());
+        assertEquals(s1.getTotalCount(),
+                s1.getAvailableCount() + s1.getOccupiedCount() + s1.getDisabledCount());
+
+        // area2：超时未到仍属进行中占座占用
+        AreaCapacityStatVO s2 = stats.get(area2);
+        assertEquals(1, s2.getTotalCount());
+        assertEquals(0, s2.getAvailableCount());
+        assertEquals(1, s2.getOccupiedCount());
+        assertEquals(0, s2.getDisabledCount());
+        assertEquals(1, s2.getOccupiedCapacity());
+
+        // 看板占用数与占座批次的在占/超时未到数对得上
+        SeatHoldBatch refreshed1 = seatHoldService.findById(batch1.getId());
+        SeatHoldBatch refreshed2 = seatHoldService.findById(batch2.getId());
+        assertEquals(refreshed1.getHeldCount() + refreshed1.getTimeoutCount(), s1.getOccupiedCount().longValue());
+        assertEquals(refreshed2.getHeldCount() + refreshed2.getTimeoutCount(), s2.getOccupiedCount().longValue());
+
+        // 下钻明细：逐椅占用标记与桌椅实时状态对得上（在占桌椅状态为停用，但单独标为占座占用）
+        AreaCapacityDetailVO detail = dashboardService.getAreaCapacityDetail(area1, 10);
+        assertEquals(1, detail.getOccupiedCount());
+        assertEquals(2, detail.getOccupiedCapacity());
+        assertEquals(detail.getTotalCount(),
+                detail.getAvailableCount() + detail.getOccupiedCount() + detail.getDisabledCount());
+        DeskChair dc001 = detail.getDeskChairs().stream()
+                .filter(d -> "DC001".equals(d.getAssetCode())).findFirst().orElseThrow();
+        assertEquals(Boolean.TRUE, dc001.getOccupied());
+        assertEquals(0, dc001.getStatus());
+        DeskChair dc003 = detail.getDeskChairs().stream()
+                .filter(d -> "DC003".equals(d.getAssetCode())).findFirst().orElseThrow();
+        assertEquals(Boolean.FALSE, dc003.getOccupied());
+
+        // 释放后刷新：占用回到可用，三桶与桌椅状态重新对齐
+        seatHoldService.release(batch1.getId(), batch1.getItems().get(0).getId(), handle("值班员甲"));
+        AreaCapacityStatVO after = statsById(dashboardService.getAreaCapacityStats()).get(area1);
+        assertEquals(2, after.getAvailableCount());
+        assertEquals(0, after.getOccupiedCount());
+        assertEquals(1, after.getDisabledCount());
+        assertEquals(6, after.getTotalCapacity());
+        assertEquals(0, after.getOccupiedCapacity());
+    }
+
     @Test
     void statsShouldCountAvailableDisabledAndCapacityExcludingDeleted() {
         List<AreaCapacityStatVO> stats = dashboardService.getAreaCapacityStats();
@@ -150,12 +235,15 @@ class DashboardServiceIntegrationTest {
         AreaCapacityStatVO s1 = statsById(stats).get(area1);
         assertEquals(3, s1.getTotalCount());
         assertEquals(2, s1.getAvailableCount());
+        assertEquals(0, s1.getOccupiedCount());
         assertEquals(1, s1.getDisabledCount());
         assertEquals(6, s1.getTotalCapacity());
+        assertEquals(0, s1.getOccupiedCapacity());
 
         AreaCapacityStatVO s2 = statsById(stats).get(area2);
         assertEquals(1, s2.getTotalCount());
         assertEquals(1, s2.getAvailableCount());
+        assertEquals(0, s2.getOccupiedCount());
         assertEquals(0, s2.getDisabledCount());
         assertEquals(1, s2.getTotalCapacity());
 
@@ -198,8 +286,10 @@ class DashboardServiceIntegrationTest {
         assertEquals("第一阅览区", detail.getAreaName());
         assertEquals(3, detail.getTotalCount());
         assertEquals(2, detail.getAvailableCount());
+        assertEquals(0, detail.getOccupiedCount());
         assertEquals(1, detail.getDisabledCount());
         assertEquals(6, detail.getTotalCapacity());
+        assertEquals(0, detail.getOccupiedCapacity());
         assertEquals(3, detail.getDeskChairs().size());
         assertTrue(detail.getDeskChairs().stream().noneMatch(d -> "DC004".equals(d.getAssetCode())));
         // 桌椅带标签

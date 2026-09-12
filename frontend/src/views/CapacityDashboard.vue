@@ -21,7 +21,9 @@
         <el-card shadow="hover" class="overview-card">
           <div class="overview-label">桌椅总数</div>
           <div class="overview-value">{{ overview.totalCount }}</div>
-          <div class="overview-sub">可用 {{ overview.availableCount }} / 停用 {{ overview.disabledCount }}</div>
+          <div class="overview-sub">
+            可用 {{ overview.availableCount }} / 占座占用 {{ overview.occupiedCount }} / 停用 {{ overview.disabledCount }}
+          </div>
         </el-card>
       </el-col>
       <el-col :span="6">
@@ -84,6 +86,10 @@
                 <div class="metric">
                   <span class="metric-value available">{{ area.availableCount ?? 0 }}</span>
                   <span class="metric-label">可用</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-value occupied">{{ area.occupiedCount ?? 0 }}</span>
+                  <span class="metric-label">占座占用</span>
                 </div>
                 <div class="metric">
                   <span class="metric-value disabled">{{ area.disabledCount ?? 0 }}</span>
@@ -205,13 +211,19 @@
             <el-descriptions-item label="可用">
               <span class="available">{{ detail.availableCount ?? 0 }}</span>
             </el-descriptions-item>
+            <el-descriptions-item label="占座占用">
+              <span class="occupied">{{ detail.occupiedCount ?? 0 }}</span>
+            </el-descriptions-item>
             <el-descriptions-item label="停用">
               <span class="disabled">{{ detail.disabledCount ?? 0 }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="容纳人数">
+            <el-descriptions-item label="可用容纳人数">
               <span class="primary">{{ detail.totalCapacity ?? 0 }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="分区描述" :span="4">
+            <el-descriptions-item label="占用容纳人数">
+              <span class="occupied">{{ detail.occupiedCapacity ?? 0 }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="分区描述" :span="2">
               {{ detail.description || '暂无描述' }}
             </el-descriptions-item>
           </el-descriptions>
@@ -225,8 +237,11 @@
             </el-table-column>
             <el-table-column label="状态" width="90" align="center">
               <template #default="scope">
-                <el-tag size="small" :type="scope.row.status === 1 ? 'success' : 'danger'">
-                  {{ scope.row.status === 1 ? '可用' : '停用' }}
+                <el-tag
+                  size="small"
+                  :type="scope.row.occupied ? 'warning' : (scope.row.status === 1 ? 'success' : 'danger')"
+                >
+                  {{ scope.row.occupied ? '占座占用' : (scope.row.status === 1 ? '可用' : '停用') }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -385,6 +400,7 @@ const overview = computed(() => {
     areaCount: areaStats.value.length,
     totalCount: 0,
     availableCount: 0,
+    occupiedCount: 0,
     disabledCount: 0,
     totalCapacity: 0,
     trendCount: 0
@@ -392,6 +408,7 @@ const overview = computed(() => {
   areaStats.value.forEach(area => {
     summary.totalCount += area.totalCount || 0
     summary.availableCount += area.availableCount || 0
+    summary.occupiedCount += area.occupiedCount || 0
     summary.disabledCount += area.disabledCount || 0
     summary.totalCapacity += area.totalCapacity || 0
   })
@@ -593,6 +610,10 @@ onMounted(() => {
   color: #67c23a;
 }
 
+.metric-value.occupied {
+  color: #e6a23c;
+}
+
 .metric-value.disabled {
   color: #f56c6c;
 }
@@ -729,6 +750,11 @@ onMounted(() => {
 
 .available {
   color: #67c23a;
+  font-weight: 600;
+}
+
+.occupied {
+  color: #e6a23c;
   font-weight: 600;
 }
 

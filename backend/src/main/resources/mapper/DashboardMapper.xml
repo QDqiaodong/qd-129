@@ -3,17 +3,31 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.mapper.DashboardMapper">
 
+    <!--
+      分区容量统计：可用 / 占座占用 / 停用三桶互斥，合计等于桌椅总数。
+      占座占用口径与占座列表一致（OPEN 批次 + 在占/超时未到明细），按桌椅当前所属分区归集，
+      保证刷新后看板数字、占座在占数和桌椅状态对得上；
+      停用只含档案停用、报修停用等非占座原因，临时占座不再混成一笔。
+    -->
     <select id="findAreaCapacityStats" resultType="com.example.vo.AreaCapacityStatVO">
         SELECT ra.id AS areaId,
                ra.area_code AS areaCode,
                ra.area_name AS areaName,
                ra.status AS areaStatus,
                COUNT(dc.id) AS totalCount,
-               COALESCE(SUM(CASE WHEN dc.status = 1 THEN 1 ELSE 0 END), 0) AS availableCount,
-               COALESCE(SUM(CASE WHEN dc.status = 0 THEN 1 ELSE 0 END), 0) AS disabledCount,
-               COALESCE(SUM(CASE WHEN dc.status = 1 THEN dc.capacity ELSE 0 END), 0) AS totalCapacity
+               COALESCE(SUM(CASE WHEN occ.desk_chair_id IS NULL AND dc.status = 1 THEN 1 ELSE 0 END), 0) AS availableCount,
+               COALESCE(SUM(CASE WHEN occ.desk_chair_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS occupiedCount,
+               COALESCE(SUM(CASE WHEN occ.desk_chair_id IS NULL AND dc.status = 0 THEN 1 ELSE 0 END), 0) AS disabledCount,
+               COALESCE(SUM(CASE WHEN occ.desk_chair_id IS NULL AND dc.status = 1 THEN dc.capacity ELSE 0 END), 0) AS totalCapacity,
+               COALESCE(SUM(CASE WHEN occ.desk_chair_id IS NOT NULL THEN dc.capacity ELSE 0 END), 0) AS occupiedCapacity
         FROM reading_area ra
         LEFT JOIN desk_chair dc ON ra.id = dc.area_id AND dc.status &gt;= 0
+        LEFT JOIN (
+            SELECT DISTINCT i.desk_chair_id
+            FROM seat_hold_item i
+            INNER JOIN seat_hold_batch b ON i.batch_id = b.id
+            WHERE b.status = 'OPEN' AND i.item_status IN ('HOLDING', 'TIMEOUT')
+        ) occ ON occ.desk_chair_id = dc.id
         GROUP BY ra.id, ra.area_code, ra.area_name, ra.status
         ORDER BY ra.area_code
     </select>

@@ -12,8 +12,9 @@ import java.util.List;
 public interface DashboardMapper {
 
     /**
-     * 按分区统计桌椅总数、可用/停用数量、可用桌椅容纳人数。
-     * 仅统计未删除资产（desk_chair.status &gt;= 0），空分区统计结果为 0。
+     * 按分区统计桌椅总数、可用/占座占用/停用数量、可用与占用的容纳人数。
+     * 仅统计未删除资产（desk_chair.status &gt;= 0），空分区统计结果为 0；
+     * 占座占用按进行中批次（OPEN）的在占/超时未到明细判定，与档案停用、报修停用分列。
      */
     List<AreaCapacityStatVO> findAreaCapacityStats();
 

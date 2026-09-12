@@ -42,4 +42,8 @@ public class DeskChair {
 
     @TableField(exist = false)
     private List<Tag> tags;
+
+    /** 是否被进行中占座批次占住（在占/超时未到），容量看板下钻明细使用 */
+    @TableField(exist = false)
+    private Boolean occupied;
 }
