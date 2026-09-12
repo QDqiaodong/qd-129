@@ -2,6 +2,7 @@ package com.example.vo;
 
 import com.example.entity.AreaChangeLog;
 import com.example.entity.DeskChair;
+import com.example.entity.LostItem;
 import lombok.Data;
 
 import java.util.List;
