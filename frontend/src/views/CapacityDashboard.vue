@@ -235,10 +235,96 @@
           </el-descriptions>
 
           <h3 class="detail-subtitle">待领取遗失物品（{{ detail.pendingLostItems?.length || 0 }}）</h3>
-          <el-table :data="detail.pendingLostItems || []" border size="small">
+          <el-table
+            ref="lostTableRef"
+            :data="detail.pendingLostItems || []"
+            border
+            size="small"
+            row-key="id"
+            class="lost-table"
+          >
+            <el-table-column type="expand">
+              <template #default="scope">
+                <div class="claim-panel">
+                  <el-alert
+                    v-if="claimErrors[scope.row.id]"
+                    type="error"
+                    :closable="false"
+                    show-icon
+                    :title="claimErrors[scope.row.id]"
+                    class="claim-error"
+                  />
+                  <el-form
+                    :ref="el => setClaimFormRef(scope.row.id, el)"
+                    :model="claimForms[scope.row.id] || {}"
+                    :rules="claimRules"
+                    label-width="92px"
+                    class="claim-form"
+                    @submit.prevent
+                  >
+                    <el-row :gutter="12">
+                      <el-col :span="12">
+                        <el-form-item label="领取人" prop="claimerName">
+                          <el-input
+                            v-model="claimForms[scope.row.id].claimerName"
+                            maxlength="100"
+                            placeholder="请填写领取人姓名"
+                          />
+                        </el-form-item>
+                      </el-col>
+                      <el-col :span="12">
+                        <el-form-item label="经办值班员" prop="operator">
+                          <el-input
+                            v-model="claimForms[scope.row.id].operator"
+                            maxlength="100"
+                            placeholder="请填写经办值班员"
+                          />
+                        </el-form-item>
+                      </el-col>
+                    </el-row>
+                    <el-form-item label="核验信息" prop="claimerVerify">
+                      <el-input
+                        v-model="claimForms[scope.row.id].claimerVerify"
+                        type="textarea"
+                        :rows="2"
+                        maxlength="200"
+                        show-word-limit
+                        placeholder="证件号/学工号及核对结果，如 学生证 20230101，核对包内校园卡一致"
+                      />
+                    </el-form-item>
+                    <el-form-item label="领取结论" prop="claimConclusion">
+                      <el-input
+                        v-model="claimForms[scope.row.id].claimConclusion"
+                        type="textarea"
+                        :rows="2"
+                        maxlength="500"
+                        show-word-limit
+                        placeholder="如 核验通过，物品完好交还领取人"
+                      />
+                    </el-form-item>
+                    <el-form-item class="claim-actions">
+                      <el-button
+                        type="primary"
+                        :loading="!!claimLoading[scope.row.id]"
+                        @click="submitClaim(scope.row)"
+                      >确认领取闭环</el-button>
+                      <span class="claim-tip">领取必须核验领取人身份并填写领取结论；闭环后该桌椅方可再开高峰占座</span>
+                    </el-form-item>
+                  </el-form>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="itemNo" label="待领单号" width="190" />
             <el-table-column prop="itemName" label="物品名称" min-width="140" show-overflow-tooltip />
             <el-table-column prop="assetCode" label="桌椅编号" width="110" />
+            <el-table-column prop="storageLocation" label="暂存位置" min-width="140" show-overflow-tooltip />
+            <el-table-column label="操作" width="110">
+              <template #default="scope">
+                <el-button link type="primary" size="small" @click="toggleClaimRow(scope.row)">
+                  办理领取
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
           <el-empty
             v-if="!detail.pendingLostItems || detail.pendingLostItems.length === 0"
@@ -310,10 +396,10 @@
 </template>
 
 <script setup>
-import { ref, computed, h, onMounted } from 'vue'
+import { ref, reactive, computed, h, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, ArrowRight } from '@element-plus/icons-vue'
-import { dashboardApi } from '../api'
+import { dashboardApi, lostItemApi } from '../api'
 
 // 简单柱状条：使用渲染函数避免再注册组件文件，原生 title 作为悬浮提示
 const BarItem = {
@@ -459,15 +545,16 @@ const openDetail = async (areaId) => {
 
 const loadDetail = async ({ silent = false } = {}) => {
   if (!detailAreaId.value) return
-  detailLoading.value = true
-  // 跟随刷新静默更新时保留旧内容，避免抽屉先被清空再渲染出现闪烁
+  // 跟随刷新静默更新时保留旧内容且不闪整屏 loading，避免抽屉先被清空再渲染出现闪烁
   if (!silent) {
+    detailLoading.value = true
     detailError.value = ''
     detail.value = null
   }
   try {
     detail.value = await dashboardApi.getAreaCapacityDetail(detailAreaId.value, 10)
     detailError.value = ''
+    syncClaimForms(detail.value.pendingLostItems || [])
   } catch (e) {
     if (silent) {
       // 静默刷新失败：保留抽屉内原有内容，仅轻提示，不打断值班员查看
@@ -476,11 +563,127 @@ const loadDetail = async ({ silent = false } = {}) => {
       detailError.value = e?.message || '网络异常，请稍后重试'
     }
   } finally {
-    detailLoading.value = false
+    if (!silent) {
+      detailLoading.value = false
+    }
   }
 }
 
 const reloadDetail = () => loadDetail()
+
+// ---- 抽屉内直接办理遗失物品领取闭环 ----
+// 每行独立表单：领取人、核验信息、领取结论、经办值班员，缺项走行内校验，
+// 提交失败原因就地显示在展开面板内，不弹走整页
+const lostTableRef = ref()
+const claimForms = reactive({})
+const claimFormRefs = new Map()
+const claimLoading = reactive({})
+const claimErrors = reactive({})
+
+const claimRules = {
+  claimerName: [{ required: true, message: '请填写领取人', trigger: 'blur' }],
+  claimerVerify: [{ required: true, message: '请填写领取人核验信息', trigger: 'blur' }],
+  claimConclusion: [{ required: true, message: '请填写领取结论', trigger: 'blur' }],
+  operator: [{ required: true, message: '请填写经办值班员', trigger: 'blur' }]
+}
+
+const emptyClaimForm = () => ({
+  claimerName: '',
+  claimerVerify: '',
+  claimConclusion: '',
+  operator: ''
+})
+
+const setClaimFormRef = (id, el) => {
+  if (el) {
+    claimFormRefs.set(id, el)
+  } else {
+    claimFormRefs.delete(id)
+  }
+}
+
+// 明细刷新后：为新出现的待领单建空表单，已闭环消失的单清掉对应状态
+const syncClaimForms = (items) => {
+  const liveIds = new Set(items.map(item => item.id))
+  items.forEach(item => {
+    if (!claimForms[item.id]) {
+      claimForms[item.id] = emptyClaimForm()
+    }
+  })
+  Object.keys(claimForms).forEach(id => {
+    if (!liveIds.has(Number(id))) {
+      delete claimForms[id]
+      delete claimLoading[id]
+      delete claimErrors[id]
+      claimFormRefs.delete(Number(id))
+    }
+  })
+}
+
+const toggleClaimRow = row => {
+  claimErrors[row.id] = ''
+  lostTableRef.value?.toggleRowExpansion(row)
+}
+
+const submitClaim = async row => {
+  const formRef = claimFormRefs.get(row.id)
+  if (!formRef || !claimForms[row.id]) return
+  try {
+    await formRef.validate()
+  } catch (e) {
+    // 缺项提示已在各字段下方展示，不离开抽屉
+    return
+  }
+  const form = claimForms[row.id]
+  claimLoading[row.id] = true
+  claimErrors[row.id] = ''
+  try {
+    await lostItemApi.claim(row.id, {
+      claimerName: form.claimerName,
+      claimerVerify: form.claimerVerify,
+      claimConclusion: form.claimConclusion,
+      operator: form.operator
+    })
+  } catch (e) {
+    // 失败原因就地呈现在该单面板内（如已被他人先领取、服务端校验不通过）
+    claimErrors[row.id] = e?.message || '领取登记失败，请稍后重试'
+    claimLoading[row.id] = false
+    // 该单已被他人先领取或已不存在：展示原因的同时静默对账，
+    // 让清单与卡片件数回归真实状态，值班员无需离开抽屉
+    const msg = claimErrors[row.id]
+    if (msg.includes('已领取闭环') || msg.includes('遗失登记单不存在')) {
+      reconcileStatsSilent()
+    }
+    return
+  }
+  claimLoading[row.id] = false
+  ElMessage.success(`遗失单 ${row.itemNo} 已领取闭环`)
+
+  // 成功后抽屉内立即收口：清单移除该单、抽屉件数与标题同步减少直至 0
+  const items = detail.value.pendingLostItems || []
+  detail.value.pendingLostItems = items.filter(item => item.id !== row.id)
+  detail.value.pendingLostCount = detail.value.pendingLostItems.length
+  delete claimForms[row.id]
+  delete claimLoading[row.id]
+  claimFormRefs.delete(row.id)
+
+  // 卡片待领数字同步减少；后台对账静默执行，失败也不打断抽屉操作
+  const stat = areaStats.value.find(area => area.areaId === detail.value.areaId)
+  if (stat) {
+    stat.pendingLostCount = Math.max(0, (stat.pendingLostCount ?? 1) - 1)
+  }
+  reconcileStatsSilent()
+}
+
+// 后台静默对账卡片统计，不影响抽屉当前内容与 loading
+const reconcileStatsSilent = async () => {
+  try {
+    areaStats.value = await dashboardApi.getAreaCapacityStats()
+    await loadDetail({ silent: true })
+  } catch (e) {
+    // 本地已先行扣减，对账失败保留本地结果，等待下次刷新
+  }
+}
 
 onMounted(() => {
   loadStats()
@@ -777,6 +980,36 @@ onMounted(() => {
 .detail-subtitle {
   font-size: 15px;
   margin: 20px 0 10px;
+}
+
+/* 抽屉内待领行直接办理领取 */
+.lost-table {
+  margin-bottom: 10px;
+}
+
+.claim-panel {
+  padding: 12px 16px 4px;
+  background: #fafbfc;
+}
+
+.claim-form {
+  max-width: 860px;
+}
+
+.claim-error {
+  margin-bottom: 12px;
+}
+
+.claim-actions {
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.claim-tip {
+  font-size: 12px;
+  color: #e6a23c;
 }
 
 .desk-tag {
