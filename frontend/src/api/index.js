@@ -105,5 +105,6 @@ export const seatHoldApi = {
     request.post(`/seat-hold/batch/${batchId}/item/${itemId}/revert-timeout`, data),
   finishBatch: (id, data) => request.post(`/seat-hold/batch/${id}/finish`, data),
   releaseLegacy: (batchId, itemId, data) =>
-    request.post(`/seat-hold/batch/${batchId}/item/${itemId}/release-legacy`, data)
+    request.post(`/seat-hold/batch/${batchId}/item/${itemId}/release-legacy`, data),
+  getClearing: id => request.get(`/seat-hold/batch/${id}/clearing`)
 }

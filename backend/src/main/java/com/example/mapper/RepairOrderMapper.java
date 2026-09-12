@@ -34,4 +34,16 @@ public interface RepairOrderMapper extends BaseMapper<RepairOrder> {
     @Select("SELECT COUNT(1) FROM repair_order " +
             "WHERE desk_chair_id = #{deskChairId} AND status IN ('PENDING', 'IN_PROGRESS')")
     int countOpenByDeskChair(@Param("deskChairId") Long deskChairId);
+
+    /**
+     * 批量查询多件资产的未闭环（待接单/维修中）报修单，
+     * 供清场清单一次性核对报修锁定，避免逐件查询；口径与 countOpenByDeskChair 一致。
+     */
+    @Select("<script>" +
+            "SELECT id, order_no, desk_chair_id, status FROM repair_order " +
+            "WHERE status IN ('PENDING', 'IN_PROGRESS') AND desk_chair_id IN " +
+            "<foreach collection='deskChairIds' item='deskChairId' open='(' separator=',' close=')'>#{deskChairId}</foreach> " +
+            "ORDER BY id" +
+            "</script>")
+    List<RepairOrder> findOpenByDeskChairIds(@Param("deskChairIds") List<Long> deskChairIds);
 }

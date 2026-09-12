@@ -1,6 +1,7 @@
 package com.example.service;
 
 import com.example.TestRedisConfig;
+import com.example.dto.RepairOrderCreateRequest;
 import com.example.dto.SeatHoldCreateRequest;
 import com.example.dto.SeatHoldHandleRequest;
 import com.example.dto.SeatHoldHoldRequest;
@@ -10,6 +11,8 @@ import com.example.entity.SeatHoldBatch;
 import com.example.entity.SeatHoldItem;
 import com.example.mapper.DeskChairMapper;
 import com.example.mapper.ReadingAreaMapper;
+import com.example.vo.SeatHoldClearingItemVO;
+import com.example.vo.SeatHoldClearingVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +30,9 @@ class SeatHoldServiceIntegrationTest {
 
     @Autowired
     private SeatHoldService seatHoldService;
+
+    @Autowired
+    private RepairOrderService repairOrderService;
 
     @Autowired
     private DeskChairMapper deskChairMapper;
@@ -112,6 +118,17 @@ class SeatHoldServiceIntegrationTest {
         return batch.getItems().stream()
                 .filter(i -> code.equals(i.getAssetCode()))
                 .findFirst().orElseThrow();
+    }
+
+    /** 对指定资产建一张未闭环报修单（报修即锁定，桌椅置停用） */
+    private void createOpenRepair(String assetCode, Long areaId) {
+        RepairOrderCreateRequest req = new RepairOrderCreateRequest();
+        req.setDeskChairId(deskId(assetCode));
+        req.setAreaId(areaId);
+        req.setDamagePart("桌腿");
+        req.setPhenomenon("晃动无法正常使用");
+        req.setReporter("读者");
+        repairOrderService.create(req);
     }
 
     @Test
@@ -339,5 +356,103 @@ class SeatHoldServiceIntegrationTest {
         assertEquals(1, seatHoldService.search(area1, SeatHoldBatch.STATUS_ENDED).size());
         assertEquals(0, seatHoldService.search(area2, SeatHoldBatch.STATUS_ENDED).size());
         assertThrows(IllegalArgumentException.class, () -> seatHoldService.search(null, "BOGUS"));
+    }
+
+    @Test
+    void clearingShouldSeparateStillDisabledDesksIntoThreeGroups() {
+        createDeskChair("DC005", area1, 1);
+        createDeskChair("DC006", area1, 1);
+        SeatHoldBatch batch = seatHoldService.createBatch(createRequest(area1,
+                List.of(deskId("DC001"), deskId("DC002"), deskId("DC005"), deskId("DC006")), "甲"));
+
+        // DC002 超时未到；DC005 占住期间被报修；DC006 当场释放恢复可用后又被报修停用
+        seatHoldService.markTimeout(batch.getId(), itemOf(batch, "DC002").getId(), handle("甲"));
+        createOpenRepair("DC005", area1);
+        seatHoldService.release(batch.getId(), itemOf(batch, "DC006").getId(), handle("甲"));
+        assertEquals(1, deskStatus("DC006"));
+        createOpenRepair("DC006", area1);
+        assertEquals(0, deskStatus("DC006"));
+
+        SeatHoldBatch ended = seatHoldService.finishBatch(batch.getId(), handle("甲"));
+        SeatHoldClearingVO clearing = seatHoldService.getClearing(ended.getId());
+
+        assertEquals(ended.getId(), clearing.getBatchId());
+        assertEquals(SeatHoldBatch.STATUS_ENDED, clearing.getBatchStatus());
+        // 四件仍停用：1 应恢复 + 1 超时未到 + 2 报修停用
+        assertEquals(4, clearing.getStillDisabledCount());
+
+        assertEquals(1, clearing.getRestorableItems().size());
+        SeatHoldClearingItemVO restorable = clearing.getRestorableItems().get(0);
+        assertEquals("DC001", restorable.getAssetCode());
+        assertEquals(SeatHoldItem.STATUS_HOLDING, restorable.getItemStatus());
+        assertEquals(1, restorable.getPreviousDeskStatus());
+        assertEquals(0, restorable.getDeskStatus());
+        assertEquals(0, restorable.getOpenRepairCount());
+        assertTrue(restorable.getReleasable());
+
+        assertEquals(1, clearing.getTimeoutDisabledItems().size());
+        SeatHoldClearingItemVO timeout = clearing.getTimeoutDisabledItems().get(0);
+        assertEquals("DC002", timeout.getAssetCode());
+        assertEquals(SeatHoldItem.STATUS_TIMEOUT, timeout.getItemStatus());
+        assertNotNull(timeout.getTimeoutBy());
+        assertTrue(timeout.getReleasable());
+
+        // 报修停用组：占住中报修的 DC005 + 已释放后报修的 DC006，报修锁定优先于明细状态
+        assertEquals(2, clearing.getRepairDisabledItems().size());
+        SeatHoldClearingItemVO repairHolding = clearing.getRepairDisabledItems().stream()
+                .filter(r -> "DC005".equals(r.getAssetCode())).findFirst().orElseThrow();
+        assertEquals(SeatHoldItem.STATUS_HOLDING, repairHolding.getItemStatus());
+        assertEquals(1, repairHolding.getOpenRepairCount());
+        assertNotNull(repairHolding.getOpenRepairOrderNos());
+        assertTrue(repairHolding.getReleasable(), "报修中的在占明细仍可释放闭环，但桌椅保持停用");
+        SeatHoldClearingItemVO repairReleased = clearing.getRepairDisabledItems().stream()
+                .filter(r -> "DC006".equals(r.getAssetCode())).findFirst().orElseThrow();
+        assertEquals(SeatHoldItem.STATUS_RELEASED, repairReleased.getItemStatus());
+        assertFalse(repairReleased.getReleasable(), "已释放明细无需重复处置");
+    }
+
+    @Test
+    void legacyReleaseShouldWriteBackPreviousStatusButKeepRepairDisabled() {
+        createDeskChair("DC005", area1, 1);
+        SeatHoldBatch batch = seatHoldService.createBatch(
+                createRequest(area1, List.of(deskId("DC001"), deskId("DC005")), "甲"));
+        createOpenRepair("DC005", area1);
+        seatHoldService.finishBatch(batch.getId(), handle("甲"));
+
+        // 应按占住前状态恢复：DC001 清场释放后回写占住前状态（可用），退出清场清单
+        seatHoldService.releaseLegacy(batch.getId(), itemOf(batch, "DC001").getId(), handle("清场员"));
+        assertEquals(1, deskStatus("DC001"));
+
+        // 档案报修仍停用：DC005 释放只闭环占座明细，报修未闭环不能恢复成可用
+        seatHoldService.releaseLegacy(batch.getId(), itemOf(batch, "DC005").getId(), handle("清场员"));
+        assertEquals(0, deskStatus("DC005"), "报修未闭环的桌椅不能被清场释放恢复成可用");
+
+        // 刷新后清场清单、桌椅档案状态和占座明细对得上
+        SeatHoldClearingVO clearing = seatHoldService.getClearing(batch.getId());
+        assertEquals(1, clearing.getStillDisabledCount());
+        assertEquals(0, clearing.getRestorableItems().size());
+        assertEquals(0, clearing.getTimeoutDisabledItems().size());
+        assertEquals(1, clearing.getRepairDisabledItems().size());
+        SeatHoldClearingItemVO row = clearing.getRepairDisabledItems().get(0);
+        assertEquals("DC005", row.getAssetCode());
+        assertEquals(SeatHoldItem.STATUS_RELEASED, row.getItemStatus());
+        assertEquals(0, row.getDeskStatus());
+        assertFalse(row.getReleasable());
+
+        SeatHoldBatch detail = seatHoldService.findById(batch.getId());
+        assertEquals(2, detail.getReleasedCount());
+        assertEquals(0, detail.getHeldCount());
+        assertEquals(SeatHoldItem.STATUS_RELEASED, itemOf(detail, "DC005").getItemStatus());
+        assertEquals(0, itemOf(detail, "DC005").getDeskStatus());
+        assertEquals(1, itemOf(detail, "DC001").getDeskStatus());
+    }
+
+    @Test
+    void clearingShouldRejectOpenBatch() {
+        SeatHoldBatch batch = seatHoldService.createBatch(
+                createRequest(area1, List.of(deskId("DC001")), "甲"));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> seatHoldService.getClearing(batch.getId()));
+        assertTrue(ex.getMessage().contains("整批结束"));
     }
 }

@@ -6,6 +6,7 @@ import com.example.dto.SeatHoldHoldRequest;
 import com.example.entity.SeatHoldBatch;
 import com.example.entity.SeatHoldItem;
 import com.example.service.SeatHoldService;
+import com.example.vo.SeatHoldClearingVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -39,6 +40,11 @@ public class SeatHoldController {
     @GetMapping("/batch/{id}")
     public ResponseEntity<SeatHoldBatch> getBatch(@PathVariable Long id) {
         return ResponseEntity.ok(seatHoldService.findById(id));
+    }
+
+    @GetMapping("/batch/{id}/clearing")
+    public ResponseEntity<SeatHoldClearingVO> getClearing(@PathVariable Long id) {
+        return ResponseEntity.ok(seatHoldService.getClearing(id));
     }
 
     @PostMapping("/batch/{id}/hold")

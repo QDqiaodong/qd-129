@@ -5,6 +5,7 @@ import com.example.dto.SeatHoldHandleRequest;
 import com.example.dto.SeatHoldHoldRequest;
 import com.example.entity.SeatHoldBatch;
 import com.example.entity.SeatHoldItem;
+import com.example.vo.SeatHoldClearingVO;
 
 import java.util.List;
 
@@ -39,4 +40,7 @@ public interface SeatHoldService {
 
     /** 已结束批次遗留的停用资产，清场确认后逐条释放恢复 */
     SeatHoldBatch releaseLegacy(Long batchId, Long itemId, SeatHoldHandleRequest request);
+
+    /** 已结束批次的清场清单：仍停用桌椅按 超时未到/应恢复/报修停用 分组 */
+    SeatHoldClearingVO getClearing(Long batchId);
 }

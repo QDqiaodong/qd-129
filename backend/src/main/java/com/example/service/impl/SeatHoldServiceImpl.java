@@ -6,6 +6,7 @@ import com.example.dto.SeatHoldHandleRequest;
 import com.example.dto.SeatHoldHoldRequest;
 import com.example.entity.DeskChair;
 import com.example.entity.ReadingArea;
+import com.example.entity.RepairOrder;
 import com.example.entity.SeatHoldBatch;
 import com.example.entity.SeatHoldItem;
 import com.example.mapper.DeskChairMapper;
@@ -14,6 +15,8 @@ import com.example.mapper.RepairOrderMapper;
 import com.example.mapper.SeatHoldBatchMapper;
 import com.example.mapper.SeatHoldItemMapper;
 import com.example.service.SeatHoldService;
+import com.example.vo.SeatHoldClearingItemVO;
+import com.example.vo.SeatHoldClearingVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -246,6 +249,77 @@ public class SeatHoldServiceImpl implements SeatHoldService {
         String operator = requireText(request == null ? null : request.getOperator(), "操作人不能为空");
         doRelease(batch, item, operator);
         return findById(batchId);
+    }
+
+    @Override
+    public SeatHoldClearingVO getClearing(Long batchId) {
+        SeatHoldBatch batch = requireBatch(batchId);
+        if (!SeatHoldBatch.STATUS_ENDED.equals(batch.getStatus())) {
+            throw new IllegalArgumentException("占座批次 " + batch.getBatchNo() + " 仍在进行中，整批结束后才生成清场清单");
+        }
+        List<SeatHoldItem> items = itemMapper.findByBatchId(batchId);
+
+        // 一次性取出本批涉及资产的未闭环报修单，避免逐件查询；口径与释放时的报修拦截一致
+        List<Long> deskChairIds = items.stream()
+                .map(SeatHoldItem::getDeskChairId)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, List<RepairOrder>> openRepairMap = deskChairIds.isEmpty()
+                ? Map.of()
+                : repairOrderMapper.findOpenByDeskChairIds(deskChairIds).stream()
+                        .collect(Collectors.groupingBy(RepairOrder::getDeskChairId,
+                                LinkedHashMap::new, Collectors.toList()));
+
+        SeatHoldClearingVO clearing = new SeatHoldClearingVO();
+        clearing.setBatchId(batch.getId());
+        clearing.setBatchNo(batch.getBatchNo());
+        clearing.setBatchStatus(batch.getStatus());
+        clearing.setRestorableItems(new ArrayList<>());
+        clearing.setTimeoutDisabledItems(new ArrayList<>());
+        clearing.setRepairDisabledItems(new ArrayList<>());
+
+        for (SeatHoldItem item : items) {
+            // 清场清单只收录仍停用的桌椅；已恢复可用的不在清场范围
+            if (!Integer.valueOf(0).equals(item.getDeskStatus())) {
+                continue;
+            }
+            List<RepairOrder> openRepairs = openRepairMap.getOrDefault(item.getDeskChairId(), List.of());
+            SeatHoldClearingItemVO row = toClearingItem(item, openRepairs);
+            // 报修锁定优先：有未闭环报修单的桌椅无论明细状态如何都归入报修停用，
+            // 释放只闭环占座明细，桌椅保持停用，不能恢复成可用
+            if (!openRepairs.isEmpty()) {
+                clearing.getRepairDisabledItems().add(row);
+            } else if (SeatHoldItem.STATUS_TIMEOUT.equals(item.getItemStatus())) {
+                clearing.getTimeoutDisabledItems().add(row);
+            } else if (SeatHoldItem.STATUS_HOLDING.equals(item.getItemStatus())) {
+                clearing.getRestorableItems().add(row);
+            }
+            // 已释放但仍停用且无未闭环报修：属释放后的其他停用原因，与本次占座无关，不列入清单
+        }
+        clearing.setStillDisabledCount(clearing.getRestorableItems().size()
+                + clearing.getTimeoutDisabledItems().size()
+                + clearing.getRepairDisabledItems().size());
+        return clearing;
+    }
+
+    private SeatHoldClearingItemVO toClearingItem(SeatHoldItem item, List<RepairOrder> openRepairs) {
+        SeatHoldClearingItemVO row = new SeatHoldClearingItemVO();
+        row.setItemId(item.getId());
+        row.setDeskChairId(item.getDeskChairId());
+        row.setAssetCode(item.getAssetCode());
+        row.setItemStatus(item.getItemStatus());
+        row.setPreviousDeskStatus(item.getPreviousDeskStatus());
+        row.setDeskStatus(item.getDeskStatus());
+        row.setOpenRepairCount(openRepairs.size());
+        row.setOpenRepairOrderNos(openRepairs.isEmpty()
+                ? null
+                : openRepairs.stream().map(RepairOrder::getOrderNo).collect(Collectors.joining("、")));
+        row.setReleasable(!SeatHoldItem.STATUS_RELEASED.equals(item.getItemStatus()));
+        row.setReleasedBy(item.getReleasedBy());
+        row.setReleasedAt(item.getReleasedAt());
+        row.setTimeoutBy(item.getTimeoutBy());
+        row.setTimeoutAt(item.getTimeoutAt());
+        return row;
     }
 
     // ==================== 内部方法 ====================
