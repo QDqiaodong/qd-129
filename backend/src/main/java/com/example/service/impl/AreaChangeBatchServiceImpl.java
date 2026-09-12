@@ -6,11 +6,13 @@ import com.example.entity.AreaChangeBatchItem;
 import com.example.entity.AreaChangeLog;
 import com.example.entity.DeskChair;
 import com.example.entity.ReadingArea;
+import com.example.entity.SeatHoldItem;
 import com.example.mapper.AreaChangeBatchItemMapper;
 import com.example.mapper.AreaChangeBatchMapper;
 import com.example.mapper.AreaChangeLogMapper;
 import com.example.mapper.DeskChairMapper;
 import com.example.mapper.ReadingAreaMapper;
+import com.example.mapper.SeatHoldItemMapper;
 import com.example.service.AreaChangeBatchService;
 import com.example.vo.BatchTransferItemVO;
 import com.example.vo.BatchTransferPreviewVO;
@@ -24,6 +26,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -38,10 +41,13 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
     /** 不可迁移原因码 */
     private static final String REASON_NOT_FOUND = "NOT_FOUND";
     private static final String REASON_DISABLED = "DISABLED";
+    /** 被进行中占座批次占住（含超时未到），与档案本身停用区分开 */
+    private static final String REASON_SEAT_HOLDING = "SEAT_HOLDING";
     private static final String REASON_ALREADY_IN_TARGET = "ALREADY_IN_TARGET";
 
     private static final String MESSAGE_NOT_FOUND = "资产不存在或已删除";
     private static final String MESSAGE_DISABLED = "资产已停用，无法调区";
+    private static final String MESSAGE_SEAT_HOLDING_PREFIX = "资产已被进行中占座批次 ";
     private static final String MESSAGE_ALREADY_IN_TARGET = "已在目标分区，无需迁移";
     private static final String MESSAGE_SKIPPED_BY_BATCH = "整批含不可迁移资产，未执行迁移";
 
@@ -60,6 +66,9 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
     @Autowired
     private ReadingAreaMapper readingAreaMapper;
 
+    @Autowired
+    private SeatHoldItemMapper seatHoldItemMapper;
+
     private final TransactionTemplate transactionTemplate;
 
     public AreaChangeBatchServiceImpl(PlatformTransactionManager transactionManager) {
@@ -75,6 +84,7 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
         int moveCount = snapshot.validIds.size();
         int invalidCount = snapshot.invalidReasons.size();
         int alreadyInTargetCount = countReasons(snapshot, REASON_ALREADY_IN_TARGET);
+        int seatHoldingCount = countReasons(snapshot, REASON_SEAT_HOLDING);
 
         BatchTransferPreviewVO vo = new BatchTransferPreviewVO();
         vo.setTargetAreaId(targetArea.getId());
@@ -83,6 +93,7 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
         vo.setMoveCount(moveCount);
         vo.setInvalidCount(invalidCount);
         vo.setAlreadyInTargetCount(alreadyInTargetCount);
+        vo.setSeatHoldingCount(seatHoldingCount);
         vo.setCanSubmit(moveCount > 0 && invalidCount == 0);
         vo.setItems(itemVOs);
         return vo;
@@ -104,8 +115,7 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
                     snapshot.ids.size(), changeReason, operator);
             List<AreaChangeBatchItem> failedItems = buildItemsForValidationFailure(
                     failedBatch, snapshot, targetArea.getId());
-            persistFailedBatch(failedBatch, failedItems,
-                    "存在 " + snapshot.invalidReasons.size() + " 项不可迁移资产，整批未执行");
+            persistFailedBatch(failedBatch, failedItems, buildValidationFailureMessage(snapshot));
             return buildResult(failedBatch.getId());
         }
 
@@ -180,31 +190,54 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
     }
 
     /**
-     * 按去重后的勾选顺序做统一快照校验：区分有效资产、已删除资产、已停用资产和已在目标分区的资产。
+     * 按去重后的勾选顺序做统一快照校验：区分有效资产、已删除资产、进行中占座占住资产、
+     * 档案停用资产和已在目标分区的资产。
+     * 占座判定走 seat_hold 同一条 OPEN 批次在占口径（与占座列表接口一致），
+     * 因此刷新后不可迁移原因能和占座列表逐项对得上。
      */
     private ValidationSnapshot validateSelection(List<Long> deskChairIds, ReadingArea targetArea) {
         ValidationSnapshot snapshot = new ValidationSnapshot();
         snapshot.ids = deskChairIds;
+
+        List<Long> disabledIds = new ArrayList<>();
         for (Long id : deskChairIds) {
             DeskChair deskChair = deskChairMapper.selectById(id);
             if (deskChair == null) {
-                snapshot.invalidReasons.put(id, REASON_NOT_FOUND);
+                snapshot.invalidReasons.put(id, new InvalidCause(REASON_NOT_FOUND, null));
                 continue;
             }
             snapshot.foundDeskChairs.put(id, deskChair);
             if (deskChair.getStatus() == null || deskChair.getStatus() != 1) {
-                snapshot.invalidReasons.put(id, REASON_DISABLED);
+                disabledIds.add(id);
             } else if (targetArea.getId().equals(deskChair.getAreaId())) {
-                snapshot.invalidReasons.put(id, REASON_ALREADY_IN_TARGET);
+                snapshot.invalidReasons.put(id, new InvalidCause(REASON_ALREADY_IN_TARGET, null));
             } else {
                 snapshot.validIds.add(id);
+            }
+        }
+
+        // 停用原因可能是高峰占座（含超时未到）或报修等档案停用：仅进行中批次占住按占座提示，
+        // 其余保持原“资产已停用”说明
+        if (!disabledIds.isEmpty()) {
+            Map<Long, SeatHoldItem> activeHolds = new LinkedHashMap<>();
+            seatHoldItemMapper.findOpenHoldsByDeskChairIds(disabledIds).forEach(item ->
+                    // 同一资产理论上只有一条进行中占座；多条时取最新一条（SQL 已按 id 倒序）
+                    activeHolds.putIfAbsent(item.getDeskChairId(), item));
+            for (Long id : disabledIds) {
+                SeatHoldItem active = activeHolds.get(id);
+                if (active != null) {
+                    snapshot.invalidReasons.put(id, new InvalidCause(REASON_SEAT_HOLDING, active.getBatchNo()));
+                } else {
+                    snapshot.invalidReasons.put(id, new InvalidCause(REASON_DISABLED, null));
+                }
             }
         }
         return snapshot;
     }
 
     private int countReasons(ValidationSnapshot snapshot, String reasonCode) {
-        return (int) snapshot.invalidReasons.values().stream().filter(reasonCode::equals).count();
+        return (int) snapshot.invalidReasons.values().stream()
+                .filter(cause -> reasonCode.equals(cause.reasonCode)).count();
     }
 
     private List<BatchTransferItemVO> buildPreviewItems(ValidationSnapshot snapshot, ReadingArea targetArea) {
@@ -218,25 +251,30 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
             itemVO.setNewAreaId(targetArea.getId());
             itemVO.setNewAreaName(targetArea.getAreaName());
 
-            String reasonCode = snapshot.invalidReasons.get(id);
+            InvalidCause cause = snapshot.invalidReasons.get(id);
             DeskChair deskChair = snapshot.foundDeskChairs.get(id);
-            if (reasonCode == null) {
+            if (cause == null) {
                 // 当前有效资产：预览与执行只处理这些项
                 fillDeskChairInfo(itemVO, deskChair, areaNameCache);
                 itemVO.setValid(true);
                 itemVO.setStatus("READY");
-            } else if (REASON_NOT_FOUND.equals(reasonCode)) {
+            } else if (REASON_NOT_FOUND.equals(cause.reasonCode)) {
                 itemVO.setValid(false);
                 itemVO.setStatus("INVALID");
                 itemVO.setReasonCode(REASON_NOT_FOUND);
                 itemVO.setErrorMessage(MESSAGE_NOT_FOUND);
             } else {
-                // 已停用或已在目标分区的资产仍展示其当前归属，便于逐项核对
+                // 已停用/占座/已在目标分区的资产仍展示其当前归属，便于逐项核对
                 fillDeskChairInfo(itemVO, deskChair, areaNameCache);
                 itemVO.setValid(false);
                 itemVO.setStatus("INVALID");
-                itemVO.setReasonCode(reasonCode);
-                if (REASON_DISABLED.equals(reasonCode)) {
+                itemVO.setReasonCode(cause.reasonCode);
+                if (REASON_SEAT_HOLDING.equals(cause.reasonCode)) {
+                    // 明确写出占住该资产的进行中批次号，值班员可直接去对应批次释放
+                    itemVO.setSeatHoldBatchNo(cause.detail);
+                    itemVO.setErrorMessage(seatHoldingMessage(cause.detail));
+                } else if (REASON_DISABLED.equals(cause.reasonCode)) {
+                    // 档案停用（如报修）仍走原来的停用说明
                     itemVO.setErrorMessage(MESSAGE_DISABLED);
                 } else {
                     itemVO.setNewAreaName(itemVO.getOldAreaName());
@@ -369,17 +407,46 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
         return items;
     }
 
-    private String reasonMessage(String reasonCode) {
-        if (REASON_NOT_FOUND.equals(reasonCode)) {
+    private String reasonMessage(InvalidCause cause) {
+        if (REASON_NOT_FOUND.equals(cause.reasonCode)) {
             return MESSAGE_NOT_FOUND;
         }
-        if (REASON_DISABLED.equals(reasonCode)) {
+        if (REASON_DISABLED.equals(cause.reasonCode)) {
             return MESSAGE_DISABLED;
         }
-        if (REASON_ALREADY_IN_TARGET.equals(reasonCode)) {
+        if (REASON_SEAT_HOLDING.equals(cause.reasonCode)) {
+            return seatHoldingMessage(cause.detail);
+        }
+        if (REASON_ALREADY_IN_TARGET.equals(cause.reasonCode)) {
             return MESSAGE_ALREADY_IN_TARGET;
         }
         return "资产不可迁移";
+    }
+
+    /**
+     * 进行中占座的逐项/批次提示：固定带上占座批次号，便于值班员按批次号去占座列表核对、释放。
+     */
+    private String seatHoldingMessage(String batchNo) {
+        String suffix = " 占住（在占/超时未到），请先在该占座批次释放后再调区";
+        return MESSAGE_SEAT_HOLDING_PREFIX + (batchNo == null ? "" : batchNo) + suffix;
+    }
+
+    /**
+     * 校验失败批次的头部失败原因：逐项原因之外，把拦截本批的进行中占座批次号汇总出来，
+     * 避免整批被拦后只看到“已停用”而对不上是哪一批占座。
+     */
+    private String buildValidationFailureMessage(ValidationSnapshot snapshot) {
+        StringBuilder message = new StringBuilder();
+        message.append("存在 ").append(snapshot.invalidReasons.size()).append(" 项不可迁移资产，整批未执行");
+        LinkedHashSet<String> holdBatchNos = snapshot.invalidReasons.values().stream()
+                .filter(cause -> REASON_SEAT_HOLDING.equals(cause.reasonCode) && cause.detail != null)
+                .map(cause -> cause.detail)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!holdBatchNos.isEmpty()) {
+            message.append("；其中 ").append(String.join("、", holdBatchNos))
+                    .append(" 为进行中占座批次，请先释放占住资产");
+        }
+        return truncate(message.toString());
     }
 
     private void persistFailedBatch(AreaChangeBatch batch, List<AreaChangeBatchItem> items, String errorMessage) {
@@ -447,12 +514,26 @@ public class AreaChangeBatchServiceImpl implements AreaChangeBatchService {
 
     /**
      * 一次批量请求的校验快照：ids 为去重后的全部勾选，validIds 为当前仍有效的资产，
-     * foundDeskChairs 缓存仍能查到的资产，invalidReasons 按资产逐项记录不可迁移原因码。
+     * foundDeskChairs 缓存仍能查到的资产，invalidReasons 按资产逐项记录不可迁移原因。
      */
     private static class ValidationSnapshot {
         private List<Long> ids = new ArrayList<>();
         private final List<Long> validIds = new ArrayList<>();
         private final Map<Long, DeskChair> foundDeskChairs = new LinkedHashMap<>();
-        private final Map<Long, String> invalidReasons = new LinkedHashMap<>();
+        private final Map<Long, InvalidCause> invalidReasons = new LinkedHashMap<>();
+    }
+
+    /**
+     * 单项不可迁移原因：reasonCode 为原因码，detail 为补充信息
+     * （SEAT_HOLDING 时为进行中占座批次号，与占座列表一致）。
+     */
+    private static class InvalidCause {
+        private final String reasonCode;
+        private final String detail;
+
+        private InvalidCause(String reasonCode, String detail) {
+            this.reasonCode = reasonCode;
+            this.detail = detail;
+        }
     }
 }

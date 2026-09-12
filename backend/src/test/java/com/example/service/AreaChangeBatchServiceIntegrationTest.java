@@ -2,10 +2,13 @@ package com.example.service;
 
 import com.example.TestRedisConfig;
 import com.example.dto.BatchTransferRequest;
+import com.example.dto.SeatHoldCreateRequest;
 import com.example.entity.AreaChangeBatch;
+import com.example.entity.AreaChangeBatchItem;
 import com.example.entity.AreaChangeLog;
 import com.example.entity.DeskChair;
 import com.example.entity.ReadingArea;
+import com.example.entity.SeatHoldBatch;
 import com.example.mapper.AreaChangeLogMapper;
 import com.example.mapper.DeskChairMapper;
 import com.example.mapper.ReadingAreaMapper;
@@ -43,6 +46,9 @@ class AreaChangeBatchServiceIntegrationTest {
     private ReadingAreaMapper readingAreaMapper;
 
     @Autowired
+    private SeatHoldService seatHoldService;
+
+    @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @SpyBean
@@ -58,6 +64,9 @@ class AreaChangeBatchServiceIntegrationTest {
         jdbcTemplate.execute("DELETE FROM area_change_batch");
         jdbcTemplate.execute("DELETE FROM area_change_log_00");
         jdbcTemplate.execute("DELETE FROM area_change_log_01");
+        jdbcTemplate.execute("DELETE FROM seat_hold_item");
+        jdbcTemplate.execute("DELETE FROM seat_hold_batch");
+        jdbcTemplate.execute("DELETE FROM repair_order");
         jdbcTemplate.execute("DELETE FROM desk_chair_tag");
         jdbcTemplate.execute("DELETE FROM desk_chair");
         jdbcTemplate.execute("DELETE FROM reading_area");
@@ -391,5 +400,125 @@ class AreaChangeBatchServiceIntegrationTest {
         // 明细中失效资产仍可追溯（已删除资产无资产编号，但保留 ID）
         AreaChangeBatch stored = areaChangeBatchService.findById(result.getBatchId());
         assertEquals(4, stored.getItems().size());
+    }
+
+    private SeatHoldBatch holdInOpenBatch(Long areaId, List<Long> deskIds, String operator) {
+        SeatHoldCreateRequest req = new SeatHoldCreateRequest();
+        req.setAreaId(areaId);
+        req.setTimeSlot("08:00-11:30 早高峰");
+        req.setDeskChairIds(deskIds);
+        req.setOperator(operator);
+        return seatHoldService.createBatch(req);
+    }
+
+    private com.example.dto.SeatHoldHandleRequest holdHandle(String operator) {
+        com.example.dto.SeatHoldHandleRequest req = new com.example.dto.SeatHoldHandleRequest();
+        req.setOperator(operator);
+        return req;
+    }
+
+    @Test
+    void previewShouldReportSeatHoldingBatchNoInsteadOfGenericDisabled() {
+        List<Long> ids = idsInArea1();
+        Long heldId = ids.get(0);
+        Long disabledId = ids.get(1);
+        Long readyId = ids.get(2);
+        String heldCode = deskChairMapper.selectById(heldId).getAssetCode();
+
+        // heldId 被进行中占座批次占住（占住后档案状态为停用）；disabledId 仅档案停用（报修口径）
+        SeatHoldBatch holdBatch = holdInOpenBatch(area1, List.of(heldId), "值班员甲");
+        DeskChair disabled = deskChairMapper.selectById(disabledId);
+        disabled.setStatus(0);
+        deskChairMapper.updateById(disabled);
+
+        BatchTransferPreviewVO preview = areaChangeBatchService.preview(
+                request(ids, area3, null, null));
+
+        assertEquals(4, preview.getSelectedCount());
+        assertEquals(2, preview.getMoveCount());
+        assertEquals(2, preview.getInvalidCount());
+        assertEquals(1, preview.getSeatHoldingCount());
+        assertFalse(preview.getCanSubmit());
+
+        java.util.Map<Long, com.example.vo.BatchTransferItemVO> itemMap = preview.getItems().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        com.example.vo.BatchTransferItemVO::getDeskChairId, item -> item));
+
+        // 占座资产：原因码为 SEAT_HOLDING，提示写明进行中占座批次号，与占座列表对得上
+        com.example.vo.BatchTransferItemVO heldItem = itemMap.get(heldId);
+        assertFalse(heldItem.getValid());
+        assertEquals("SEAT_HOLDING", heldItem.getReasonCode());
+        assertEquals(holdBatch.getBatchNo(), heldItem.getSeatHoldBatchNo());
+        assertTrue(heldItem.getErrorMessage().contains(holdBatch.getBatchNo()));
+        assertTrue(heldItem.getErrorMessage().contains("进行中占座批次"));
+        assertEquals(heldCode, heldItem.getAssetCode());
+
+        // 档案停用资产：仍走原来的停用说明，不挂占座批次
+        com.example.vo.BatchTransferItemVO disabledItem = itemMap.get(disabledId);
+        assertEquals("DISABLED", disabledItem.getReasonCode());
+        assertNull(disabledItem.getSeatHoldBatchNo());
+        assertEquals("资产已停用，无法调区", disabledItem.getErrorMessage());
+
+        assertTrue(itemMap.get(readyId).getValid());
+    }
+
+    @Test
+    void previewShouldTreatEndedBatchLegacyDisabledAsPlainDisabledAndMatchHoldList() {
+        List<Long> ids = idsInArea1();
+        Long heldId = ids.get(0);
+        SeatHoldBatch holdBatch = holdInOpenBatch(area1, List.of(heldId), "值班员甲");
+
+        // 整批结束后遗留资产保持停用：占座列表不再展示，调区原因回到档案停用
+        seatHoldService.finishBatch(holdBatch.getId(), holdHandle("值班员甲"));
+
+        BatchTransferPreviewVO preview = areaChangeBatchService.preview(
+                request(ids, area3, null, null));
+        com.example.vo.BatchTransferItemVO heldItem = preview.getItems().stream()
+                .filter(item -> heldId.equals(item.getDeskChairId())).findFirst().orElseThrow();
+        assertEquals("DISABLED", heldItem.getReasonCode());
+        assertNull(heldItem.getSeatHoldBatchNo());
+        assertEquals("资产已停用，无法调区", heldItem.getErrorMessage());
+
+        // 进行中占座列表已无该资产，口径一致
+        assertEquals(0, seatHoldService.findOpenHolds(area1).size());
+    }
+
+    @Test
+    void executeShouldRecordHoldingBatchNoInFailedHeaderAndItemMessages() {
+        List<Long> ids = new java.util.ArrayList<>(idsInArea1());
+        Long heldId = ids.get(0);
+        SeatHoldBatch holdBatch = holdInOpenBatch(area1, List.of(heldId), "值班员甲");
+
+        BatchTransferResultVO result = areaChangeBatchService.execute(
+                request(ids, area3, "高峰后调区", "李四"));
+
+        assertEquals("FAILED", result.getStatus());
+        assertEquals(4, result.getTotalCount());
+        assertEquals(0, result.getSuccessCount());
+        assertEquals(4, result.getFailCount());
+
+        // 批次头失败原因汇总出拦截本批的进行中占座批次号
+        assertNotNull(result.getErrorMessage());
+        assertTrue(result.getErrorMessage().contains(holdBatch.getBatchNo()));
+        assertTrue(result.getErrorMessage().contains("进行中占座批次"));
+
+        java.util.Map<Long, String> messages = result.getItems().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        com.example.vo.BatchTransferItemVO::getDeskChairId,
+                        com.example.vo.BatchTransferItemVO::getErrorMessage));
+        // 占座资产逐项原因写明批次号；其余资产随整批跳过
+        assertTrue(messages.get(heldId).contains(holdBatch.getBatchNo()));
+        assertTrue(messages.get(heldId).contains("进行中占座批次"));
+        ids.stream().filter(id -> !id.equals(heldId))
+                .forEach(id -> assertEquals("整批含不可迁移资产，未执行迁移", messages.get(id)));
+
+        // 任何资产都未迁移
+        ids.forEach(id -> assertEquals(area1, deskChairMapper.selectById(id).getAreaId()));
+
+        // 持久化的失败批次明细仍带占座批次号，刷新后可与占座列表核对
+        AreaChangeBatch stored = areaChangeBatchService.findById(result.getBatchId());
+        AreaChangeBatchItem storedHeldItem = stored.getItems().stream()
+                .filter(item -> heldId.equals(item.getDeskChairId())).findFirst().orElseThrow();
+        assertTrue(storedHeldItem.getErrorMessage().contains(holdBatch.getBatchNo()));
     }
 }

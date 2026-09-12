@@ -147,6 +147,15 @@
           :title="invalidAlertTitle"
         />
         <el-alert
+          v-if="holdMismatch && !holdMismatch.consistent"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="preview-alert"
+          title="刷新后预览的占座原因与最新占座列表对不上，已阻止提交"
+          :description="holdMismatchAlertDescription"
+        />
+        <el-alert
           type="success"
           :closable="false"
           show-icon
@@ -177,7 +186,7 @@
           <el-table-column label="新归属" width="150">
             <template #default="scope">{{ scope.row.newAreaName }}</template>
           </el-table-column>
-          <el-table-column label="校验结果" min-width="160">
+          <el-table-column label="校验结果" min-width="240">
             <template #default="scope">
               <el-tag v-if="scope.row.valid" type="success" size="small">可迁移</el-tag>
               <el-tag v-else type="danger" size="small">{{ scope.row.errorMessage }}</el-tag>
@@ -188,10 +197,10 @@
 
       <template #footer>
         <el-button @click="transferDialogVisible = false">取消</el-button>
-        <el-button :loading="previewLoading" @click="handlePreview">预览迁移</el-button>
+        <el-button :loading="previewLoading || holdListLoading" @click="handlePreview">预览迁移</el-button>
         <el-button
           type="primary"
-          :disabled="!preview || !preview.canSubmit"
+          :disabled="!preview || !preview.canSubmit || (holdMismatch && !holdMismatch.consistent)"
           :loading="executeLoading"
           @click="handleExecute"
         >
@@ -238,7 +247,7 @@
           <el-table-column label="新归属" width="150">
             <template #default="scope">{{ scope.row.newAreaName || '-' }}</template>
           </el-table-column>
-          <el-table-column label="结果" min-width="180">
+          <el-table-column label="结果" min-width="260">
             <template #default="scope">
               <el-tag v-if="scope.row.status === 'SUCCESS'" type="success" size="small">成功</el-tag>
               <el-tag v-else type="danger" size="small">{{ scope.row.errorMessage || '失败' }}</el-tag>
@@ -282,7 +291,7 @@
           <el-table-column label="新归属" width="150">
             <template #default="scope">{{ scope.row.newAreaName || '-' }}</template>
           </el-table-column>
-          <el-table-column label="结果" min-width="160">
+          <el-table-column label="结果" min-width="260">
             <template #default="scope">
               <el-tag v-if="scope.row.status === 'SUCCESS'" type="success" size="small">成功</el-tag>
               <el-tag v-else type="danger" size="small">{{ scope.row.errorMessage || '失败' }}</el-tag>
@@ -300,9 +309,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { deskChairApi, readingAreaApi, tagApi, batchApi } from '../api'
+import { deskChairApi, readingAreaApi, tagApi, batchApi, seatHoldApi } from '../api'
 import { useDeskSelection } from '../composables/useDeskSelection'
-import { summarizeInvalidItems, buildInvalidAlertTitle } from '../utils/previewSummary'
+import { summarizeInvalidItems, buildInvalidAlertTitle, checkHoldConsistency } from '../utils/previewSummary'
+import { indexActiveHolds } from '../utils/peakSlot'
 
 const deskChairs = ref([])
 const readingAreas = ref([])
@@ -348,6 +358,25 @@ const preview = ref(null)
 const result = ref(null)
 const batchDetail = ref(null)
 
+// 最新进行中占座列表（/seat-hold/active，仅 OPEN 批次），用于和预览的占座原因逐项对账
+const activeHoldMap = ref(new Map())
+const holdListLoading = ref(false)
+
+const loadActiveHolds = async () => {
+  holdListLoading.value = true
+  try {
+    // 批量调区可能跨分区勾选，占座列表查全部分区
+    const holds = await seatHoldApi.listActiveHolds(undefined)
+    activeHoldMap.value = indexActiveHolds(holds)
+  } catch (e) {
+    // 占座列表拉不到时不做对账，避免拿过期数据误判；保留空映射并提示
+    activeHoldMap.value = new Map()
+    ElMessage.warning('进行中占座列表加载失败，无法核对占座原因，请稍后重试预览')
+  } finally {
+    holdListLoading.value = false
+  }
+}
+
 const targetAreaOptions = computed(() =>
   readingAreas.value.filter(area => area.status === 1 || area.status === undefined)
 )
@@ -372,6 +401,20 @@ const invalidSummary = computed(() =>
 const invalidAlertTitle = computed(() =>
   invalidSummary.value ? buildInvalidAlertTitle(invalidSummary.value) : ''
 )
+
+// 刷新后预览的进行中占座原因必须与最新占座列表逐项对得上，对不齐则明确提示并阻止提交
+const holdMismatch = computed(() =>
+  preview.value ? checkHoldConsistency(preview.value.items, activeHoldMap.value) : null
+)
+
+const holdMismatchAlertDescription = computed(() => {
+  if (!holdMismatch.value || holdMismatch.value.consistent) return ''
+  const lines = holdMismatch.value.mismatches.slice(0, 5).map(m => m.message)
+  const more = holdMismatch.value.mismatches.length > 5
+    ? `等 ${holdMismatch.value.mismatches.length} 项`
+    : ''
+  return `${lines.join('；')}${more}。请点击“预览迁移”按最新占座列表重新核对后再提交。`
+})
 
 const loadDeskChairs = async () => {
   const rows = await deskChairApi.search({
@@ -421,6 +464,8 @@ const openTransferDialog = async () => {
   transferForm.operator = ''
   preview.value = null
   transferDialogVisible.value = true
+  // 打开时先拉最新占座列表，保证“不可迁移原因”与占座列表同源
+  await loadActiveHolds()
 }
 
 const handleTransferClosed = () => {
@@ -444,9 +489,13 @@ const handlePreview = async () => {
   }
   previewLoading.value = true
   try {
+    // 每次预览都同步刷新进行中占座列表，保证占座原因与占座列表对得上
+    await loadActiveHolds()
     preview.value = await batchApi.preview(buildPayload())
     if (!preview.value.canSubmit) {
       ElMessage.error('存在不可迁移资产，请调整勾选后再提交')
+    } else if (holdMismatch.value && !holdMismatch.value.consistent) {
+      ElMessage.warning('占座原因与最新占座列表对不上，请重新核对后再提交')
     }
   } catch (e) {
     ElMessage.error(e.message || '预览失败')
@@ -459,6 +508,12 @@ const handleExecute = async () => {
   try {
     await transferFormRef.value.validate()
   } catch (e) {
+    return
+  }
+  // 提交前再按最新占座列表对一次账：对不齐明确阻止，避免整批被拦后对不上占座批次
+  await loadActiveHolds()
+  if (holdMismatch.value && !holdMismatch.value.consistent) {
+    ElMessage.error('进行中占座列表与预览原因对不上，请重新预览核对后再提交')
     return
   }
   executeLoading.value = true
