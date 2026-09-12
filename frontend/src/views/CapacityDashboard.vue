@@ -47,7 +47,7 @@
       <template #header>
         <div class="section-header">
           <span class="section-title">分区容量明细</span>
-          <span class="section-tip">点击分区卡片可下钻查看桌椅与最近变更</span>
+          <span class="section-tip">点击分区卡片可下钻查看桌椅、待领遗失与最近变更</span>
         </div>
       </template>
 
@@ -98,6 +98,12 @@
                 <div class="metric">
                   <span class="metric-value primary">{{ area.totalCapacity ?? 0 }}</span>
                   <span class="metric-label">容纳人数</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-value" :class="{ lost: (area.pendingLostCount ?? 0) > 0 }">
+                    {{ area.pendingLostCount ?? 0 }}
+                  </span>
+                  <span class="metric-label">待领遗失</span>
                 </div>
               </div>
 
@@ -227,6 +233,17 @@
               {{ detail.description || '暂无描述' }}
             </el-descriptions-item>
           </el-descriptions>
+
+          <h3 class="detail-subtitle">待领取遗失物品（{{ detail.pendingLostItems?.length || 0 }}）</h3>
+          <el-table :data="detail.pendingLostItems || []" border size="small">
+            <el-table-column prop="itemNo" label="待领单号" width="190" />
+            <el-table-column prop="itemName" label="物品名称" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="assetCode" label="桌椅编号" width="110" />
+          </el-table>
+          <el-empty
+            v-if="!detail.pendingLostItems || detail.pendingLostItems.length === 0"
+            description="该分区暂无待领取遗失物品"
+          />
 
           <h3 class="detail-subtitle">桌椅明细（{{ detail.deskChairs?.length || 0 }}）</h3>
           <el-table :data="detail.deskChairs || []" border size="small">
@@ -620,6 +637,10 @@ onMounted(() => {
 
 .metric-value.primary {
   color: #409eff;
+}
+
+.metric-value.lost {
+  color: #c45656;
 }
 
 .metric-label {

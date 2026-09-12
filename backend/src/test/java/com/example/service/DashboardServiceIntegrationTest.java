@@ -2,10 +2,13 @@ package com.example.service;
 
 import com.example.TestRedisConfig;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.dto.LostItemClaimRequest;
+import com.example.dto.LostItemCreateRequest;
 import com.example.dto.SeatHoldCreateRequest;
 import com.example.dto.SeatHoldHandleRequest;
 import com.example.entity.AreaChangeLog;
 import com.example.entity.DeskChair;
+import com.example.entity.LostItem;
 import com.example.entity.ReadingArea;
 import com.example.entity.SeatHoldBatch;
 import com.example.entity.Tag;
@@ -43,6 +46,9 @@ class DashboardServiceIntegrationTest {
     private SeatHoldService seatHoldService;
 
     @Autowired
+    private LostItemService lostItemService;
+
+    @Autowired
     private ReadingAreaMapper readingAreaMapper;
 
     @Autowired
@@ -64,6 +70,7 @@ class DashboardServiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.execute("DELETE FROM lost_item");
         jdbcTemplate.execute("DELETE FROM seat_hold_item");
         jdbcTemplate.execute("DELETE FROM seat_hold_batch");
         jdbcTemplate.execute("DELETE FROM repair_order");
@@ -166,6 +173,25 @@ class DashboardServiceIntegrationTest {
     private SeatHoldHandleRequest handle(String operator) {
         SeatHoldHandleRequest req = new SeatHoldHandleRequest();
         req.setOperator(operator);
+        return req;
+    }
+
+    private LostItemCreateRequest lostRequest(Long areaId, String assetCode, String itemName) {
+        LostItemCreateRequest req = new LostItemCreateRequest();
+        req.setAreaId(areaId);
+        req.setDeskChairId(deskChairMapper.findByAssetCode(assetCode).getId());
+        req.setItemName(itemName);
+        req.setStorageLocation("服务台抽屉 1 号");
+        req.setOperator("值班员甲");
+        return req;
+    }
+
+    private LostItemClaimRequest claimRequest() {
+        LostItemClaimRequest req = new LostItemClaimRequest();
+        req.setClaimerName("张三");
+        req.setClaimerVerify("学生证 20230101，核对一致");
+        req.setClaimConclusion("核验通过，物品完好交还领取人");
+        req.setOperator("值班员乙");
         return req;
     }
 
@@ -302,6 +328,46 @@ class DashboardServiceIntegrationTest {
         assertEquals(2, detail.getRecentChanges().size());
         assertTrue(detail.getRecentChanges().stream().allMatch(log ->
                 area1.equals(log.getOldAreaId()) || area1.equals(log.getNewAreaId())));
+    }
+
+    @Test
+    void statsAndDetailShouldShowPendingLostItemsExcludingClaimed() {
+        // area1：两单待领、一单已领取闭环；area2：一单待领
+        LostItem pending1 = lostItemService.create(lostRequest(area1, "DC001", "黑色双肩包"));
+        LostItem pending2 = lostItemService.create(lostRequest(area1, "DC002", "保温杯"));
+        LostItem claimed = lostItemService.create(lostRequest(area1, "DC003", "雨伞"));
+        lostItemService.claim(claimed.getId(), claimRequest());
+        lostItemService.create(lostRequest(area2, "DC005", "校园卡"));
+
+        // 看板件数只算待领取，已领取闭环不计入；空分区与停用分区为 0
+        Map<Long, AreaCapacityStatVO> stats = statsById(dashboardService.getAreaCapacityStats());
+        assertEquals(2, stats.get(area1).getPendingLostCount());
+        assertEquals(1, stats.get(area2).getPendingLostCount());
+        assertEquals(0, stats.get(emptyArea).getPendingLostCount());
+        assertEquals(0, stats.get(disabledArea).getPendingLostCount());
+
+        // 下钻抽屉：待领单号、物品名称、桌椅编号齐全，已领取单不在清单里
+        AreaCapacityDetailVO detail = dashboardService.getAreaCapacityDetail(area1, 10);
+        assertEquals(2, detail.getPendingLostCount());
+        assertEquals(2, detail.getPendingLostItems().size());
+        assertTrue(detail.getPendingLostItems().stream()
+                .allMatch(item -> LostItem.STATUS_PENDING.equals(item.getStatus())));
+        assertTrue(detail.getPendingLostItems().stream()
+                .noneMatch(item -> claimed.getItemNo().equals(item.getItemNo())));
+        LostItem first = detail.getPendingLostItems().stream()
+                .filter(item -> pending1.getItemNo().equals(item.getItemNo()))
+                .findFirst().orElseThrow();
+        assertEquals("黑色双肩包", first.getItemName());
+        assertEquals("DC001", first.getAssetCode());
+
+        // 再领取一单后重新查询（刷新）：件数与清单同步减少，剩余待领仍在
+        lostItemService.claim(pending2.getId(), claimRequest());
+        Map<Long, AreaCapacityStatVO> reloaded = statsById(dashboardService.getAreaCapacityStats());
+        assertEquals(1, reloaded.get(area1).getPendingLostCount());
+        AreaCapacityDetailVO reloadedDetail = dashboardService.getAreaCapacityDetail(area1, 10);
+        assertEquals(1, reloadedDetail.getPendingLostCount());
+        assertEquals(1, reloadedDetail.getPendingLostItems().size());
+        assertEquals(pending1.getItemNo(), reloadedDetail.getPendingLostItems().get(0).getItemNo());
     }
 
     @Test

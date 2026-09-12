@@ -19,13 +19,13 @@ public class DashboardController {
     @Autowired
     private DashboardService dashboardService;
 
-    /** 分区容量运营看板：桌椅总数、可用/停用、容纳人数 */
+    /** 分区容量运营看板：桌椅总数、可用/停用、容纳人数、当前待领取遗失件数 */
     @GetMapping("/area-capacity")
     public ResponseEntity<List<AreaCapacityStatVO>> getAreaCapacityStats() {
         return ResponseEntity.ok(dashboardService.getAreaCapacityStats());
     }
 
-    /** 分区下钻：桌椅明细 + 标签构成 + 最近调区记录 */
+    /** 分区下钻：桌椅明细 + 标签构成 + 待领取遗失清单 + 最近调区记录 */
     @GetMapping("/area-capacity/{areaId}")
     public ResponseEntity<AreaCapacityDetailVO> getAreaCapacityDetail(
             @PathVariable Long areaId,

@@ -2,10 +2,12 @@ package com.example.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.entity.DeskChair;
+import com.example.entity.LostItem;
 import com.example.entity.ReadingArea;
 import com.example.entity.SeatHoldItem;
 import com.example.mapper.DashboardMapper;
 import com.example.mapper.DeskChairMapper;
+import com.example.mapper.LostItemMapper;
 import com.example.mapper.ReadingAreaMapper;
 import com.example.mapper.SeatHoldItemMapper;
 import com.example.mapper.TagMapper;
@@ -45,6 +47,9 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Autowired
     private SeatHoldItemMapper seatHoldItemMapper;
+
+    @Autowired
+    private LostItemMapper lostItemMapper;
 
     @Autowired
     private TagMapper tagMapper;
@@ -131,6 +136,13 @@ public class DashboardServiceImpl implements DashboardService {
         detail.setOccupiedCapacity(occupiedCapacity);
 
         detail.setTagStats(dashboardMapper.findTagStatsByAreaId(areaId));
+
+        // 待领取遗失清单：仅 PENDING，已领取闭环不计入；件数直接取清单长度，
+        // 与看板分区卡片上的待领件数（lost_item 按登记分区快照统计）口径一致
+        List<LostItem> pendingLostItems = lostItemMapper.findPendingByAreaId(areaId);
+        detail.setPendingLostItems(pendingLostItems);
+        detail.setPendingLostCount(pendingLostItems.size());
+
         detail.setRecentChanges(areaChangeLogService.findRecentByAreaId(areaId,
                 recentLimit > 0 ? recentLimit : 10));
         return detail;

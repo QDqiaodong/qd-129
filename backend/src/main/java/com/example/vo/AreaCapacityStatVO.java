@@ -37,6 +37,9 @@ public class AreaCapacityStatVO {
     /** 占座占用容纳人数（按进行中占座占用桌椅的 capacity 求和） */
     private Integer occupiedCapacity;
 
+    /** 当前待领取遗失件数（仅 PENDING，已领取闭环不计入；按登记分区快照归集） */
+    private Integer pendingLostCount;
+
     /** 标签构成（不含已删除资产关联） */
     private List<AreaTagStatVO> tagStats;
 }

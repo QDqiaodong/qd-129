@@ -33,6 +33,12 @@ public class AreaCapacityDetailVO {
     /** 占座占用容纳人数 */
     private Integer occupiedCapacity;
 
+    /** 当前待领取遗失件数（仅 PENDING，已领取闭环不计入） */
+    private Integer pendingLostCount;
+
+    /** 待领取遗失单清单（单号、物品名称、桌椅编号等，按登记时间倒序） */
+    private List<LostItem> pendingLostItems;
+
     /** 分区内桌椅明细（不含已删除资产，含停用资产） */
     private List<DeskChair> deskChairs;
 
