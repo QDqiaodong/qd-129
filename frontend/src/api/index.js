@@ -89,6 +89,16 @@ export const stocktakeApi = {
   completeBatch: (id, data) => request.post(`/stocktake/batch/${id}/complete`, data)
 }
 
+export const lostItemApi = {
+  create: data => request.post('/lost-item', data),
+  list: params => request.get('/lost-item', {
+    params: { areaId: params?.areaId || undefined, status: params?.status || undefined }
+  }),
+  listPending: areaId => request.get('/lost-item/pending', { params: { areaId } }),
+  getById: id => request.get(`/lost-item/${id}`),
+  claim: (id, data) => request.post(`/lost-item/${id}/claim`, data)
+}
+
 export const seatHoldApi = {
   createBatch: data => request.post('/seat-hold/batch', data),
   listBatches: params => request.get('/seat-hold/batch', {

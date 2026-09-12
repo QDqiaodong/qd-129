@@ -187,6 +187,31 @@ CREATE TABLE IF NOT EXISTS stocktake_handle_record (
     INDEX idx_item_id (item_id)
 );
 
+CREATE TABLE IF NOT EXISTS lost_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    item_no VARCHAR(40) NOT NULL UNIQUE COMMENT '遗失登记单号 YW+时间戳+随机串',
+    area_id BIGINT NOT NULL COMMENT '登记时所属阅览分区快照',
+    desk_chair_id BIGINT NOT NULL COMMENT '捡到位置对应的桌椅',
+    asset_code VARCHAR(50) NOT NULL COMMENT '桌椅资产编号快照',
+    item_name VARCHAR(200) NOT NULL COMMENT '物品名称',
+    storage_location VARCHAR(200) NOT NULL COMMENT '暂存位置',
+    status VARCHAR(20) NOT NULL COMMENT 'PENDING待领取/CLAIMED已领取',
+    remark VARCHAR(500),
+    found_by VARCHAR(100) NOT NULL COMMENT '登记值班员',
+    claimer_name VARCHAR(100) NULL COMMENT '领取人',
+    claimer_verify VARCHAR(200) NULL COMMENT '领取人核验信息（证件号/学工号等）',
+    claim_conclusion VARCHAR(500) NULL COMMENT '领取结论',
+    claimed_by VARCHAR(100) NULL COMMENT '领取经办值班员',
+    claimed_at DATETIME NULL COMMENT '领取时间',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (area_id) REFERENCES reading_area(id),
+    FOREIGN KEY (desk_chair_id) REFERENCES desk_chair(id),
+    INDEX idx_area_status (area_id, status),
+    INDEX idx_desk_chair_id (desk_chair_id),
+    INDEX idx_status (status)
+);
+
 CREATE TABLE IF NOT EXISTS seat_hold_batch (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     batch_no VARCHAR(40) NOT NULL UNIQUE COMMENT '占座批次号 ZZ+时间戳+随机串',

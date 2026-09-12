@@ -5,11 +5,13 @@ import com.example.dto.SeatHoldCreateRequest;
 import com.example.dto.SeatHoldHandleRequest;
 import com.example.dto.SeatHoldHoldRequest;
 import com.example.entity.DeskChair;
+import com.example.entity.LostItem;
 import com.example.entity.ReadingArea;
 import com.example.entity.RepairOrder;
 import com.example.entity.SeatHoldBatch;
 import com.example.entity.SeatHoldItem;
 import com.example.mapper.DeskChairMapper;
+import com.example.mapper.LostItemMapper;
 import com.example.mapper.ReadingAreaMapper;
 import com.example.mapper.RepairOrderMapper;
 import com.example.mapper.SeatHoldBatchMapper;
@@ -54,6 +56,9 @@ public class SeatHoldServiceImpl implements SeatHoldService {
 
     @Autowired
     private RepairOrderMapper repairOrderMapper;
+
+    @Autowired
+    private LostItemMapper lostItemMapper;
 
     private final TransactionTemplate transactionTemplate;
 
@@ -341,6 +346,13 @@ public class SeatHoldServiceImpl implements SeatHoldService {
             if (!Objects.equals(deskChair.getAreaId(), batch.getAreaId())) {
                 throw new IllegalArgumentException("资产 " + deskChair.getAssetCode()
                         + " 不属于占座分区，请重新勾选");
+            }
+            // 仍待领取遗失物品的桌椅不能开高峰占座：给出遗失单号和物品名称，领取闭环后才放行
+            LostItem pendingLost = lostItemMapper.findPendingByDeskChair(deskChairId);
+            if (pendingLost != null) {
+                throw new IllegalArgumentException("资产 " + deskChair.getAssetCode()
+                        + " 旁有待领取遗失物品（" + pendingLost.getItemNo() + " "
+                        + pendingLost.getItemName() + "），领取闭环前不能开高峰占座");
             }
             if (Integer.valueOf(0).equals(deskChair.getStatus())) {
                 // 停用原因可能是报修或其他占座批次，优先给出在占批次的明确提示

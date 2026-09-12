@@ -164,6 +164,29 @@ CREATE INDEX IF NOT EXISTS idx_repair_area_status ON repair_order (area_id, stat
 CREATE INDEX IF NOT EXISTS idx_repair_desk_chair ON repair_order (desk_chair_id);
 CREATE INDEX IF NOT EXISTS idx_repair_status ON repair_order (status);
 
+CREATE TABLE IF NOT EXISTS lost_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    item_no VARCHAR(40) NOT NULL UNIQUE,
+    area_id BIGINT NOT NULL,
+    desk_chair_id BIGINT NOT NULL,
+    asset_code VARCHAR(50) NOT NULL,
+    item_name VARCHAR(200) NOT NULL,
+    storage_location VARCHAR(200) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    remark VARCHAR(500),
+    found_by VARCHAR(100) NOT NULL,
+    claimer_name VARCHAR(100) NULL,
+    claimer_verify VARCHAR(200) NULL,
+    claim_conclusion VARCHAR(500) NULL,
+    claimed_by VARCHAR(100) NULL,
+    claimed_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_lost_item_area_status ON lost_item (area_id, status);
+CREATE INDEX IF NOT EXISTS idx_lost_item_desk_chair ON lost_item (desk_chair_id);
+CREATE INDEX IF NOT EXISTS idx_lost_item_status ON lost_item (status);
+
 CREATE TABLE IF NOT EXISTS seat_hold_batch (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     batch_no VARCHAR(40) NOT NULL UNIQUE,

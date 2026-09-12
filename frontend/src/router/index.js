@@ -44,6 +44,11 @@ const routes = [
     path: '/seat-hold',
     name: 'SeatHold',
     component: () => import('../views/SeatHold.vue')
+  },
+  {
+    path: '/lost-item',
+    name: 'LostItem',
+    component: () => import('../views/LostItem.vue')
   }
 ]
 

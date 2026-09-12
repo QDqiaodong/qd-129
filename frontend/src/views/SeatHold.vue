@@ -115,7 +115,7 @@
     >
       <el-alert
         v-if="blockedCount > 0"
-        :title="`当前筛选结果有 ${blockedCount} 件不可占（停用/报修/已被其他进行中批次占住），勾选框已禁用，悬停或查看“不可占原因”列。`"
+        :title="`当前筛选结果有 ${blockedCount} 件不可占（停用/报修/已被其他进行中批次占住/有待领取遗失物品），勾选框已禁用，悬停或查看“不可占原因”列。`"
         type="warning"
         :closable="false"
         show-icon
@@ -313,8 +313,8 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { seatHoldApi, readingAreaApi, deskChairApi } from '../api'
-import { PEAK_TIME_SLOTS, indexActiveHolds, holdEligibility, itemStatusText, batchStatusText } from '../utils/peakSlot'
+import { seatHoldApi, readingAreaApi, deskChairApi, lostItemApi } from '../api'
+import { PEAK_TIME_SLOTS, indexActiveHolds, indexPendingLostItems, holdEligibility, itemStatusText, batchStatusText } from '../utils/peakSlot'
 
 const batches = ref([])
 const readingAreas = ref([])
@@ -340,6 +340,7 @@ const pickerRowCache = new Map()
 const pickerSelectedIds = ref(new Set())
 const pickerSelectedRows = ref([])
 const pickerActiveHolds = ref(new Map())
+const pickerPendingLost = ref(new Map())
 const pickerSubmitting = ref(false)
 const editingBatch = ref(null)
 
@@ -382,14 +383,15 @@ const onCreateAreaChange = () => {
 
 const canSelectRow = row => {
   const areaId = pickerMode.value === 'create' ? createForm.areaId : editingBatch.value?.areaId
-  return holdEligibility(row, areaId, pickerActiveHolds.value, existingInBatchIds.value).selectable
+  return holdEligibility(row, areaId, pickerActiveHolds.value, existingInBatchIds.value, pickerPendingLost.value).selectable
 }
 
 const blockReason = row => holdEligibility(
   row,
   pickerMode.value === 'create' ? createForm.areaId : editingBatch.value?.areaId,
   pickerActiveHolds.value,
-  existingInBatchIds.value
+  existingInBatchIds.value,
+  pickerPendingLost.value
 ).reason
 
 // 追加占住时，当前批次已有明细（含已释放）的资产禁选，一件资产一批只占一次
@@ -474,6 +476,7 @@ const handlePickerClosed = () => {
   pickerRows.value = []
   pickerFilters.keyword = ''
   pickerActiveHolds.value = new Map()
+  pickerPendingLost.value = new Map()
 }
 
 const openPicker = async mode => {
@@ -492,11 +495,13 @@ const openPicker = async mode => {
   }
   const areaId = pickerMode.value === 'create' ? createForm.areaId : editingBatch.value.areaId
   pickerVisible.value = true
-  const [holds] = await Promise.all([
+  const [holds, pendingLost] = await Promise.all([
     seatHoldApi.listActiveHolds(areaId),
+    lostItemApi.listPending(areaId),
     loadPickerDesks()
   ])
   pickerActiveHolds.value = indexActiveHolds(holds)
+  pickerPendingLost.value = indexPendingLostItems(pendingLost)
   await syncPickerSelection()
 }
 
