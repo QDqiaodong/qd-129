@@ -311,6 +311,7 @@
 
 <script setup>
 import { ref, computed, h, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Refresh, ArrowRight } from '@element-plus/icons-vue'
 import { dashboardApi } from '../api'
 
@@ -364,6 +365,11 @@ const loadStats = async () => {
     statsError.value = e?.message || '网络异常，请稍后重试'
   } finally {
     statsLoading.value = false
+  }
+  // 抽屉处于打开状态时，刷新要同步更新抽屉里的待领清单，避免卡片件数已减少
+  // 而抽屉仍挂着已领取闭环的旧单号（空了应显示 0 与暂无待领）
+  if (detailVisible.value) {
+    await loadDetail({ silent: true })
   }
 }
 
@@ -451,15 +457,24 @@ const openDetail = async (areaId) => {
   await loadDetail()
 }
 
-const loadDetail = async () => {
+const loadDetail = async ({ silent = false } = {}) => {
   if (!detailAreaId.value) return
   detailLoading.value = true
-  detailError.value = ''
-  detail.value = null
+  // 跟随刷新静默更新时保留旧内容，避免抽屉先被清空再渲染出现闪烁
+  if (!silent) {
+    detailError.value = ''
+    detail.value = null
+  }
   try {
     detail.value = await dashboardApi.getAreaCapacityDetail(detailAreaId.value, 10)
+    detailError.value = ''
   } catch (e) {
-    detailError.value = e?.message || '网络异常，请稍后重试'
+    if (silent) {
+      // 静默刷新失败：保留抽屉内原有内容，仅轻提示，不打断值班员查看
+      ElMessage.error(e?.message || '分区明细刷新失败，请稍后重试')
+    } else {
+      detailError.value = e?.message || '网络异常，请稍后重试'
+    }
   } finally {
     detailLoading.value = false
   }
