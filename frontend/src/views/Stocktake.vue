@@ -242,7 +242,7 @@
             </el-button>
             <el-button
               type="success"
-              :disabled="!canComplete"
+              :disabled="!detail.items.length"
               :loading="completeLoading"
               @click="handleComplete"
             >
@@ -252,7 +252,27 @@
         </div>
 
         <!-- 差异明细 -->
-        <el-table :data="detail.items" border size="small" class="item-table">
+        <div class="item-toolbar">
+          <el-radio-group v-model="itemFilter" size="small">
+            <el-radio-button label="ALL">全部明细（{{ detail.items.length }}）</el-radio-button>
+            <el-radio-button label="MISSING">
+              仅缺失（{{ missingItems.length }}）
+            </el-radio-button>
+            <el-radio-button label="MISSING_NO_REASON">
+              缺缺失原因（{{ missingWithoutReasonItems.length }}）
+            </el-radio-button>
+          </el-radio-group>
+          <el-button
+            v-if="detail.status === 'OPEN' && missingWithoutReasonItems.length > 0"
+            size="small"
+            type="danger"
+            plain
+            @click="promptMissingReasonBlock"
+          >
+            {{ missingWithoutReasonItems.length }} 件缺失未写原因，点此查看
+          </el-button>
+        </div>
+        <el-table :data="filteredItems" border size="small" class="item-table">
           <el-table-column prop="assetCode" label="资产编号" width="100" fixed />
           <el-table-column label="差异类型" width="100" fixed>
             <template #default="scope">
@@ -287,9 +307,17 @@
               <span v-if="scope.row.recheckCount > 0" class="recheck-badge">复核{{ scope.row.recheckCount }}次</span>
             </template>
           </el-table-column>
-          <el-table-column label="处理意见" min-width="160">
+          <el-table-column label="缺失原因/处理意见" min-width="180">
             <template #default="scope">
-              <div>{{ scope.row.handleOpinion || '-' }}</div>
+              <template v-if="scope.row.diffType === 'MISSING'">
+                <div v-if="scope.row.missingReason" class="missing-reason">
+                  {{ scope.row.missingReason }}
+                </div>
+                <div v-else class="missing-reason-empty">未填写缺失原因</div>
+              </template>
+              <template v-else>
+                <div>{{ scope.row.handleOpinion || '-' }}</div>
+              </template>
               <div v-if="scope.row.confirmedBy" class="confirm-meta">
                 {{ scope.row.confirmedBy }} · {{ formatTime(scope.row.confirmedAt) }}
               </div>
@@ -357,7 +385,25 @@
         class="confirm-alert"
       />
       <el-form ref="confirmFormRef" :model="confirmForm" :rules="confirmRules" label-width="82px">
-        <el-form-item label="处理意见" prop="handleOpinion">
+        <el-form-item
+          v-if="currentItem && currentItem.diffType === 'MISSING'"
+          label="缺失原因"
+          prop="missingReason"
+        >
+          <el-input
+            v-model="confirmForm.missingReason"
+            type="textarea"
+            :rows="3"
+            maxlength="1000"
+            show-word-limit
+            placeholder="该在册资产本轮未盘到，请写明缺失原因，如：借出维修未归还、搬离阅览区待核查等"
+          />
+        </el-form-item>
+        <el-form-item
+          v-else
+          label="处理意见"
+          prop="handleOpinion"
+        >
           <el-input
             v-model="confirmForm.handleOpinion"
             type="textarea"
@@ -380,7 +426,7 @@
     <!-- 重新复核 -->
     <el-dialog v-model="recheckVisible" title="重新复核" width="560px" append-to-body>
       <el-alert
-        title="复核后该明细将回到“待核”状态，原确认意见保留在处理记录中。"
+        title="复核后该明细将回到“待核”状态，原确认意见与缺失原因保留在处理记录中，需重新写明后才能完成批次。"
         type="warning"
         :closable="false"
         show-icon
@@ -457,11 +503,18 @@ const recheckVisible = ref(false)
 const recordsVisible = ref(false)
 const currentItem = ref(null)
 const confirmFormRef = ref()
-const confirmForm = reactive({ handleOpinion: '', operator: '' })
-const confirmRules = {
-  handleOpinion: [{ required: true, message: '请填写处理意见', trigger: 'blur' }],
-  operator: [{ required: true, message: '请填写操作人', trigger: 'blur' }]
-}
+const confirmForm = reactive({ handleOpinion: '', missingReason: '', operator: '' })
+const confirmRules = computed(() => {
+  const rules = {
+    operator: [{ required: true, message: '请填写操作人', trigger: 'blur' }]
+  }
+  if (currentItem.value && currentItem.value.diffType === 'MISSING') {
+    rules.missingReason = [{ required: true, message: '请填写缺失原因', trigger: 'blur' }]
+  } else {
+    rules.handleOpinion = [{ required: true, message: '请填写处理意见', trigger: 'blur' }]
+  }
+  return rules
+})
 const recheckOpinion = ref('')
 const recheckOperator = ref('')
 
@@ -469,11 +522,27 @@ const areaOptions = computed(() =>
   readingAreas.value.filter(area => area.status === 1 || area.status === undefined)
 )
 
-const canComplete = computed(() =>
-  detail.value
-  && detail.value.status === 'OPEN'
-  && detail.value.items.length > 0
-  && detail.value.checkedCount === detail.value.items.length
+// 盘点处理页可按缺失筛出在册未盘到的行
+const itemFilter = ref('ALL')
+
+const missingItems = computed(() =>
+  detail.value ? detail.value.items.filter(i => i.diffType === 'MISSING') : []
+)
+
+// 在册未盘到且还没写明缺失原因的行（已核/待核都算，完成前必须补全）
+const missingWithoutReasonItems = computed(() =>
+  missingItems.value.filter(i => !i.missingReason || !String(i.missingReason).trim())
+)
+
+const filteredItems = computed(() => {
+  if (!detail.value) return []
+  if (itemFilter.value === 'MISSING') return missingItems.value
+  if (itemFilter.value === 'MISSING_NO_REASON') return missingWithoutReasonItems.value
+  return detail.value.items
+})
+
+const pendingItems = computed(() =>
+  detail.value ? detail.value.items.filter(i => i.checkStatus !== 'CONFIRMED') : []
 )
 
 const loadBatches = async () => {
@@ -532,6 +601,7 @@ const resetEntry = () => {
   submitOperator.value = detail.value?.operator || ''
   parsedPreview.lines = []
   parsedPreview.errors = []
+  itemFilter.value = 'ALL'
 }
 
 const openDetail = async id => {
@@ -638,10 +708,43 @@ const handleSubmit = async () => {
   }
 }
 
+const formatAssetCodeList = items => {
+  const codes = items.map(i => i.assetCode)
+  const shown = codes.slice(0, 10).join('、')
+  return codes.length > 10 ? `${shown} 等 ${codes.length} 件` : shown
+}
+
+// 完成前拦截：还有待核行，或在册未盘到的行没写明缺失原因，都要点名提示
+const promptIncomplete = () => {
+  if (pendingItems.value.length > 0) {
+    itemFilter.value = 'ALL'
+    ElMessage.error(`还有 ${pendingItems.value.length} 条明细待核，请逐项确认：${formatAssetCodeList(pendingItems.value)}`)
+    return true
+  }
+  if (missingWithoutReasonItems.value.length > 0) {
+    itemFilter.value = 'MISSING_NO_REASON'
+    ElMessage.error(
+      `以下 ${missingWithoutReasonItems.value.length} 件在册资产未盘到且未填写缺失原因，请补全后再完成：${
+        formatAssetCodeList(missingWithoutReasonItems.value)}`
+    )
+    return true
+  }
+  return false
+}
+
+const promptMissingReasonBlock = () => {
+  itemFilter.value = 'MISSING_NO_REASON'
+  ElMessage.error(
+    `以下 ${missingWithoutReasonItems.value.length} 件在册资产未盘到，需先写明缺失原因并确认：${
+      formatAssetCodeList(missingWithoutReasonItems.value)}`
+  )
+}
+
 const handleComplete = async () => {
+  if (promptIncomplete()) return
   try {
     await ElMessageBox.confirm(
-      `全部 ${detail.value.items.length} 条明细均已确认，完成后批次将锁定，不可再录入或修改。确认完成？`,
+      `全部 ${detail.value.items.length} 条明细均已确认且缺失原因已写明，完成后批次将锁定，不可再录入或修改。确认完成？`,
       '完成盘点批次',
       { type: 'warning', confirmButtonText: '完成批次', cancelButtonText: '取消' }
     )
@@ -666,6 +769,8 @@ const handleComplete = async () => {
 const openConfirm = item => {
   currentItem.value = item
   confirmForm.handleOpinion = ''
+  // 缺失项确认时填写缺失原因（重新复核后原原因已清空）
+  confirmForm.missingReason = item.missingReason || ''
   confirmForm.operator = detail.value.operator || ''
   confirmVisible.value = true
 }
@@ -678,7 +783,11 @@ const handleConfirm = async () => {
   }
   actionLoading.value = true
   try {
-    await stocktakeApi.confirmItem(detail.value.id, currentItem.value.id, { ...confirmForm })
+    const payload = { ...confirmForm }
+    if (currentItem.value.diffType !== 'MISSING') {
+      payload.missingReason = ''
+    }
+    await stocktakeApi.confirmItem(detail.value.id, currentItem.value.id, payload)
     ElMessage.success('已确认')
     confirmVisible.value = false
     await refreshDetail()
@@ -868,8 +977,25 @@ onMounted(() => {
   width: 140px;
 }
 
+.item-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 .item-table {
   margin-bottom: 24px;
+}
+
+.missing-reason {
+  color: #f56c6c;
+}
+
+.missing-reason-empty {
+  color: #f56c6c;
+  font-weight: 600;
 }
 
 .recheck-badge {

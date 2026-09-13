@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS stocktake_item (
     actual_tag_names VARCHAR(1000),
     check_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/CONFIRMED',
     handle_opinion VARCHAR(1000),
+    missing_reason VARCHAR(1000) NULL COMMENT '缺失原因：在册未盘到（MISSING）的明细必填，否则批次不可完成',
     confirmed_by VARCHAR(100),
     confirmed_at DATETIME NULL,
     recheck_count INT NOT NULL DEFAULT 0,

@@ -137,6 +137,13 @@ class StocktakeServiceIntegrationTest {
         return req;
     }
 
+    private StocktakeHandleRequest handleMissing(String missingReason, String operator) {
+        StocktakeHandleRequest req = new StocktakeHandleRequest();
+        req.setMissingReason(missingReason);
+        req.setOperator(operator);
+        return req;
+    }
+
     private StocktakeItem itemOf(StocktakeBatch batch, String code) {
         return batch.getItems().stream()
                 .filter(i -> code.equals(i.getAssetCode()))
@@ -239,11 +246,14 @@ class StocktakeServiceIntegrationTest {
         stocktakeService.confirmItem(batch.getId(),
                 itemOf(stocktakeService.findById(batch.getId()), "DC001").getId(),
                 handle("一致无误", "张三"));
-        // DC002/DC003 缺失项也需确认
+        // DC002/DC003 缺失项也需写明缺失原因后确认
         StocktakeBatch fresh = stocktakeService.findById(batch.getId());
         fresh.getItems().stream()
                 .filter(i -> StocktakeItem.CHECK_PENDING.equals(i.getCheckStatus()))
-                .forEach(i -> stocktakeService.confirmItem(batch.getId(), i.getId(), handle("记录缺失", "张三")));
+                .forEach(i -> stocktakeService.confirmItem(batch.getId(), i.getId(),
+                        StocktakeItem.DIFF_MISSING.equals(i.getDiffType())
+                                ? handleMissing("搬至维修间，暂未归位", "张三")
+                                : handle("记录缺失", "张三")));
         stocktakeService.completeBatch(batch.getId(), handle(null, "张三"));
 
         assertThrows(IllegalArgumentException.class, () -> stocktakeService.submitActuals(
@@ -270,6 +280,68 @@ class StocktakeServiceIntegrationTest {
         // 重复确认被阻止
         assertThrows(IllegalArgumentException.class,
                 () -> stocktakeService.confirmItem(batch.getId(), itemId, handle("再次确认", "李四")));
+    }
+
+    @Test
+    void missingItemShouldRequireMissingReasonOnConfirmAndRetainIt() {
+        StocktakeBatch batch = stocktakeService.createBatch(createRequest(area1, "张三"));
+        stocktakeService.submitActuals(batch.getId(),
+                List.of(line("DC001", area1, 1, null)), "张三", null);
+        StocktakeItem missing = itemOf(stocktakeService.findById(batch.getId()), "DC002");
+        assertEquals(StocktakeItem.DIFF_MISSING, missing.getDiffType());
+
+        // 未填写缺失原因：确认被拦
+        assertThrows(IllegalArgumentException.class,
+                () -> stocktakeService.confirmItem(batch.getId(), missing.getId(),
+                        handleMissing("  ", "张三")));
+
+        StocktakeBatch confirmed = stocktakeService.confirmItem(
+                batch.getId(), missing.getId(), handleMissing("借出维修暂未归还", "李四"));
+        StocktakeItem item = itemOf(confirmed, "DC002");
+        assertEquals(StocktakeItem.CHECK_CONFIRMED, item.getCheckStatus());
+        assertEquals("借出维修暂未归还", item.getMissingReason());
+        assertTrue(item.getHandleOpinion().contains("借出维修暂未归还"));
+        // 处理记录可追溯到缺失原因
+        assertTrue(item.getRecords().stream()
+                .anyMatch(r -> StocktakeHandleRecord.ACTION_CONFIRM.equals(r.getAction())
+                        && r.getOpinion().contains("借出维修暂未归还")));
+
+        // 重新复核后缺失原因与确认意见一并清空，需重新写明
+        StocktakeBatch rechecked = stocktakeService.recheckItem(
+                batch.getId(), item.getId(), handle("现场再找一遍", "王五"));
+        StocktakeItem recheckItem = itemOf(rechecked, "DC002");
+        assertNull(recheckItem.getMissingReason());
+        assertNull(recheckItem.getHandleOpinion());
+        assertThrows(IllegalArgumentException.class,
+                () -> stocktakeService.completeBatch(batch.getId(), handle(null, "张三")));
+    }
+
+    @Test
+    void completeShouldListAssetsWhoseMissingReasonIsAbsent() {
+        StocktakeBatch batch = stocktakeService.createBatch(createRequest(area1, "张三"));
+        stocktakeService.submitActuals(batch.getId(),
+                List.of(line("DC001", area1, 1, null)), "张三", null);
+        StocktakeBatch fresh = stocktakeService.findById(batch.getId());
+        for (StocktakeItem i : fresh.getItems()) {
+            if (StocktakeItem.DIFF_MISSING.equals(i.getDiffType())) {
+                stocktakeService.confirmItem(batch.getId(), i.getId(),
+                        handleMissing("搬离现场", "张三"));
+            } else {
+                stocktakeService.confirmItem(batch.getId(), i.getId(), handle("账实一致", "张三"));
+            }
+        }
+
+        // 模拟缺失原因丢失（数据异常/历史数据）：完成时必须拦住并点名资产编号
+        jdbcTemplate.update("UPDATE stocktake_item SET missing_reason = NULL WHERE asset_code = 'DC002'");
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> stocktakeService.completeBatch(batch.getId(), handle(null, "张三")));
+        assertTrue(ex.getMessage().contains("缺失原因"));
+        assertTrue(ex.getMessage().contains("DC002"));
+        assertFalse(ex.getMessage().contains("DC003"));
+
+        jdbcTemplate.update("UPDATE stocktake_item SET missing_reason = '借出未归还' WHERE asset_code = 'DC002'");
+        StocktakeBatch completed = stocktakeService.completeBatch(batch.getId(), handle(null, "张三"));
+        assertEquals(StocktakeBatch.STATUS_COMPLETED, completed.getStatus());
     }
 
     @Test
@@ -315,7 +387,7 @@ class StocktakeServiceIntegrationTest {
         stocktakeService.findById(batch.getId()).getItems()
                 .forEach(i -> stocktakeService.confirmItem(batch.getId(), i.getId(),
                         StocktakeItem.DIFF_MATCH.equals(i.getDiffType()) ? handle("账实一致", "张三")
-                                : handle("记录缺失并报修", "张三")));
+                                : handleMissing("记录缺失并报修", "张三")));
 
         StocktakeBatch completed = stocktakeService.completeBatch(
                 batch.getId(), handle("盘点闭环", "张三"));

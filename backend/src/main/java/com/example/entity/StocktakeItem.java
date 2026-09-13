@@ -85,6 +85,13 @@ public class StocktakeItem {
     @TableField("handle_opinion")
     private String handleOpinion;
 
+    /**
+     * 缺失原因：仅 MISSING（在册未盘到）明细使用，确认缺失项时必填，
+     * 批次完成前所有缺失项都必须写明原因。
+     */
+    @TableField("missing_reason")
+    private String missingReason;
+
     @TableField("confirmed_by")
     private String confirmedBy;
 

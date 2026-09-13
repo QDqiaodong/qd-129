@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS stocktake_item (
     actual_tag_names VARCHAR(1000),
     check_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     handle_opinion VARCHAR(1000),
+    missing_reason VARCHAR(1000),
     confirmed_by VARCHAR(100),
     confirmed_at TIMESTAMP NULL,
     recheck_count INT NOT NULL DEFAULT 0,

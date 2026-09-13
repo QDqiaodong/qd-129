@@ -242,20 +242,36 @@ public class StocktakeServiceImpl implements StocktakeService {
         StocktakeBatch batch = requireBatch(batchId);
         requireOpen(batch);
         StocktakeItem item = requireItem(batch, itemId);
-        String opinion = requireText(request == null ? null : request.getHandleOpinion(),
-                "请填写处理意见后再确认");
         String operator = requireText(request == null ? null : request.getOperator(), "操作人不能为空");
         if (StocktakeItem.CHECK_CONFIRMED.equals(item.getCheckStatus())) {
             throw new IllegalArgumentException("该明细已确认，请先重新复核再修改");
         }
 
+        String recordOpinion;
+        if (StocktakeItem.DIFF_MISSING.equals(item.getDiffType())) {
+            // 在册未盘到的缺失项必须写明缺失原因，作为批次完成的硬性前置
+            String missingReason = requireText(request.getMissingReason(),
+                    "请填写缺失原因后再确认（资产编号：" + item.getAssetCode() + "）");
+            missingReason = truncate(missingReason, 1000);
+            item.setMissingReason(missingReason);
+            // 缺失项不另设处理意见录入入口，留痕意见由缺失原因生成，保证逐项记录可追溯
+            String opinion = request.getHandleOpinion() == null || request.getHandleOpinion().trim().isEmpty()
+                    ? "缺失原因：" + missingReason : truncate(request.getHandleOpinion(), 1000);
+            item.setHandleOpinion(opinion);
+            recordOpinion = opinion;
+        } else {
+            String opinion = requireText(request.getHandleOpinion(), "请填写处理意见后再确认");
+            item.setHandleOpinion(truncate(opinion, 1000));
+            item.setMissingReason(null);
+            recordOpinion = opinion;
+        }
+
         item.setCheckStatus(StocktakeItem.CHECK_CONFIRMED);
-        item.setHandleOpinion(truncate(opinion, 1000));
         item.setConfirmedBy(operator);
         item.setConfirmedAt(LocalDateTime.now());
         item.setUpdatedAt(LocalDateTime.now());
         itemMapper.updateById(item);
-        insertItemRecord(batch, item, StocktakeHandleRecord.ACTION_CONFIRM, opinion, operator);
+        insertItemRecord(batch, item, StocktakeHandleRecord.ACTION_CONFIRM, recordOpinion, operator);
         refreshCheckedCount(batch);
         return findById(batch.getId());
     }
@@ -274,10 +290,11 @@ public class StocktakeServiceImpl implements StocktakeService {
                 || request.getHandleOpinion().trim().isEmpty()
                 ? "管理员发起重新复核" : request.getHandleOpinion().trim();
 
-        // updateById 默认 NOT_NULL 策略会跳过 null，须显式 set 才能清空原确认意见/确认人/确认时间
+        // updateById 默认 NOT_NULL 策略会跳过 null，须显式 set 才能清空原确认意见/缺失原因/确认人/确认时间
         item.setCheckStatus(StocktakeItem.CHECK_PENDING);
         item.setRecheckCount((item.getRecheckCount() == null ? 0 : item.getRecheckCount()) + 1);
         item.setHandleOpinion(null);
+        item.setMissingReason(null);
         item.setConfirmedBy(null);
         item.setConfirmedAt(null);
         item.setUpdatedAt(LocalDateTime.now());
@@ -286,6 +303,7 @@ public class StocktakeServiceImpl implements StocktakeService {
                 .set(StocktakeItem::getCheckStatus, StocktakeItem.CHECK_PENDING)
                 .set(StocktakeItem::getRecheckCount, item.getRecheckCount())
                 .set(StocktakeItem::getHandleOpinion, null)
+                .set(StocktakeItem::getMissingReason, null)
                 .set(StocktakeItem::getConfirmedBy, null)
                 .set(StocktakeItem::getConfirmedAt, null)
                 .set(StocktakeItem::getUpdatedAt, LocalDateTime.now()));
@@ -307,6 +325,18 @@ public class StocktakeServiceImpl implements StocktakeService {
         long pending = items.stream().filter(i -> StocktakeItem.CHECK_PENDING.equals(i.getCheckStatus())).count();
         if (pending > 0) {
             throw new IllegalArgumentException("仍有 " + pending + " 条明细待核，请逐项确认后再完成批次");
+        }
+
+        // 闭环硬约束：所有在册未盘到的缺失行都必须写明缺失原因，提示里直接列出还缺原因的资产编号
+        List<String> missingWithoutReason = items.stream()
+                .filter(i -> StocktakeItem.DIFF_MISSING.equals(i.getDiffType()))
+                .filter(i -> i.getMissingReason() == null || i.getMissingReason().trim().isEmpty())
+                .map(StocktakeItem::getAssetCode)
+                .toList();
+        if (!missingWithoutReason.isEmpty()) {
+            throw new IllegalArgumentException("以下 " + missingWithoutReason.size()
+                    + " 件在册资产未盘到且未填写缺失原因，请补全后再完成："
+                    + String.join("、", missingWithoutReason));
         }
 
         batch.setStatus(StocktakeBatch.STATUS_COMPLETED);
