@@ -9,8 +9,13 @@
     <el-card class="filter-card">
       <el-form :inline="true" :model="filters">
         <el-form-item label="阅览分区">
-          <el-select v-model="filters.areaId" placeholder="全部分区" clearable style="width: 200px" @change="loadBatches">
-            <el-option v-for="area in readingAreas" :key="area.id" :label="area.areaName" :value="area.id" />
+          <el-select v-model="filters.areaId" placeholder="全部分区" clearable style="width: 220px" @change="loadBatches">
+            <el-option
+              v-for="area in readingAreas"
+              :key="area.id"
+              :label="areaFilterLabel(area)"
+              :value="area.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="批次状态">
@@ -29,8 +34,17 @@
     <el-card class="batch-card">
       <el-table :data="batches" border>
         <el-table-column prop="batchNo" label="批次号" width="190" />
-        <el-table-column label="占座分区" min-width="130">
-          <template #default="scope">{{ scope.row.areaName }}（{{ scope.row.areaCode }}）</template>
+        <el-table-column label="占座分区" min-width="160">
+          <template #default="scope">
+            {{ scope.row.areaName }}（{{ scope.row.areaCode }}）
+            <el-tag
+              v-if="batchAreaClosed(scope.row.areaId)"
+              type="danger"
+              size="small"
+              effect="plain"
+              class="closed-inline-tag"
+            >闭馆中</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="timeSlot" label="高峰时段" min-width="170" show-overflow-tooltip />
         <el-table-column label="在占/超时/已释放" width="150">
@@ -75,8 +89,20 @@
               :key="area.id"
               :label="`${area.areaName}（${area.areaCode}）`"
               :value="area.id"
-            />
+              :disabled="isAreaClosed(area)"
+            >
+              <span>{{ area.areaName }}（{{ area.areaCode }}）</span>
+              <span v-if="isAreaClosed(area)" class="closed-option-tag">今日闭馆至 {{ closedUntilShort(area.closedUntil) }}</span>
+            </el-option>
           </el-select>
+          <el-alert
+            v-if="selectedCreateAreaClosed"
+            type="error"
+            :closable="false"
+            show-icon
+            class="closed-alert"
+            :title="`该阅览区今日闭馆，闭馆至 ${formatClosedUntil(selectedCreateAreaClosed.closedUntil)}，结束时刻后才能开新批次占座。`"
+          />
         </el-form-item>
         <el-form-item label="高峰时段" prop="timeSlot">
           <el-select
@@ -99,7 +125,7 @@
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!createForm.areaId" @click="openPicker()">
+        <el-button type="primary" :disabled="!canOpenPicker" @click="openPicker()">
           下一步：从桌椅档案勾选资产
         </el-button>
       </template>
@@ -315,6 +341,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { seatHoldApi, readingAreaApi, deskChairApi, lostItemApi } from '../api'
 import { PEAK_TIME_SLOTS, indexActiveHolds, indexPendingLostItems, holdEligibility, itemStatusText, batchStatusText } from '../utils/peakSlot'
+import { isAreaClosed, formatClosedUntil, closedUntilShort, closedAreaLabel } from '../utils/areaClosure'
 
 const batches = ref([])
 const readingAreas = ref([])
@@ -352,6 +379,20 @@ const finishLoading = ref(false)
 const areaOptions = computed(() =>
   readingAreas.value.filter(area => area.status === 1 || area.status === undefined)
 )
+
+const selectedCreateArea = computed(() =>
+  readingAreas.value.find(area => area.id === createForm.areaId) || null
+)
+const selectedCreateAreaClosed = computed(() =>
+  selectedCreateArea.value && isAreaClosed(selectedCreateArea.value) ? selectedCreateArea.value : null
+)
+const canOpenPicker = computed(() => !!createForm.areaId && !selectedCreateAreaClosed.value)
+
+// 批次列表/筛选里的分区闭馆角标；到期未刷新也能按当前时刻自动消失
+const areaById = id => readingAreas.value.find(area => area.id === id)
+const batchAreaClosed = areaId => isAreaClosed(areaById(areaId))
+const areaFilterLabel = area =>
+  isAreaClosed(area) ? `${area.areaName}（${closedAreaLabel(area)}）` : area.areaName
 
 const blockedCount = computed(() => pickerRows.value.filter(row => !canSelectRow(row)).length)
 
@@ -488,6 +529,13 @@ const openPicker = async mode => {
     try {
       await createFormRef.value.validate()
     } catch (e) {
+      return
+    }
+    // 双保险：下拉已禁用闭馆分区，这里再拦一次并发挂牌/数据陈旧
+    if (selectedCreateAreaClosed.value) {
+      ElMessage.error(
+        `该阅览区今日闭馆，闭馆至 ${formatClosedUntil(selectedCreateAreaClosed.value.closedUntil)}，结束时刻后再开批`
+      )
       return
     }
     pickerMode.value = 'create'
@@ -731,6 +779,20 @@ onMounted(() => {
 
 .picker-alert {
   margin-bottom: 12px;
+}
+
+.closed-alert {
+  margin-top: 8px;
+}
+
+.closed-option-tag {
+  float: right;
+  color: #f56c6c;
+  font-size: 12px;
+}
+
+.closed-inline-tag {
+  margin-left: 6px;
 }
 
 .block-reason {

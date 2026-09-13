@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS reading_area (
     area_name VARCHAR(100) NOT NULL,
     description TEXT,
     status TINYINT DEFAULT 1,
+    closed_until DATETIME NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -295,3 +296,13 @@ INSERT INTO desk_chair_tag (desk_chair_id, tag_id) VALUES
 (10, 2), (10, 4),
 (11, 2),
 (12, 2), (12, 4);
+
+-- 今日闭馆：值班员为阅览区挂带结束时刻的闭馆牌（已建库环境补列，幂等）
+SET @ddl := (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reading_area' AND COLUMN_NAME = 'closed_until') = 0,
+    'ALTER TABLE reading_area ADD COLUMN closed_until DATETIME NULL AFTER status',
+    'SELECT 1'));
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

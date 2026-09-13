@@ -5,6 +5,7 @@ import com.example.entity.DeskChair;
 import com.example.entity.LostItem;
 import lombok.Data;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -17,6 +18,12 @@ public class AreaCapacityDetailVO {
     private String areaName;
 
     private Integer areaStatus;
+
+    /** 挂出的闭馆结束时刻（可能已到期；以 closed 字段判断是否正在闭馆） */
+    private LocalDateTime closedUntil;
+
+    /** 是否正在闭馆：closedUntil 晚于当前时刻 */
+    private Boolean closed;
 
     private String description;
 

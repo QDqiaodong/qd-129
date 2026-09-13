@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS reading_area (
     area_name VARCHAR(100) NOT NULL,
     description CLOB,
     status TINYINT DEFAULT 1,
+    closed_until TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

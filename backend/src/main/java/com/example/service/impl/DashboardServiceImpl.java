@@ -68,6 +68,8 @@ public class DashboardServiceImpl implements DashboardService {
         }
         for (AreaCapacityStatVO stat : stats) {
             stat.setTagStats(tagStatsByArea.getOrDefault(stat.getAreaId(), new ArrayList<>()));
+            // 是否正在闭馆以当前时刻为准：已到期的闭馆挂牌不再产生效力
+            stat.setClosed(stat.getClosedUntil() != null && stat.getClosedUntil().isAfter(LocalDateTime.now()));
         }
         return stats;
     }
@@ -84,6 +86,8 @@ public class DashboardServiceImpl implements DashboardService {
         detail.setAreaCode(area.getAreaCode());
         detail.setAreaName(area.getAreaName());
         detail.setAreaStatus(area.getStatus());
+        detail.setClosedUntil(area.getClosedUntil());
+        detail.setClosed(area.getClosedUntil() != null && area.getClosedUntil().isAfter(LocalDateTime.now()));
         detail.setDescription(area.getDescription());
 
         // 桌椅明细：含停用资产、排除已删除资产，并补齐标签

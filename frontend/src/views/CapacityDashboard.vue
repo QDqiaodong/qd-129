@@ -67,7 +67,7 @@
 
         <el-row v-else :gutter="16">
           <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="area in areaStats" :key="area.areaId">
-            <div class="area-card" @click="openDetail(area.areaId)">
+            <div class="area-card" :class="{ 'area-card-closed': isAreaClosed(area) }" @click="openDetail(area.areaId)">
               <div class="area-card-header">
                 <div class="area-title-wrap">
                   <span class="area-code">{{ area.areaCode }}</span>
@@ -76,6 +76,12 @@
                 <el-tag size="small" :type="area.areaStatus === 1 ? 'success' : 'info'">
                   {{ area.areaStatus === 1 ? '启用' : '停用' }}
                 </el-tag>
+              </div>
+
+              <!-- 今日闭馆牌：值班员在阅览分区页挂出，结束时刻后自动消失，不与“停用”混为一谈 -->
+              <div v-if="isAreaClosed(area)" class="closed-banner">
+                <el-icon><CircleCloseFilled /></el-icon>
+                <span>今日闭馆，闭馆至 {{ formatClosedUntil(area.closedUntil) }}</span>
               </div>
 
               <div class="area-metrics">
@@ -212,6 +218,14 @@
         </el-result>
 
         <template v-else-if="detail">
+          <el-alert
+            v-if="isAreaClosed(detail)"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="`该区今日闭馆，闭馆至 ${formatClosedUntil(detail.closedUntil)}；结束时刻前不能开新批次高峰占座。`"
+            class="detail-closed-alert"
+          />
           <el-descriptions :column="4" border class="detail-desc">
             <el-descriptions-item label="桌椅总数">{{ detail.totalCount ?? 0 }}</el-descriptions-item>
             <el-descriptions-item label="可用">
@@ -398,8 +412,9 @@
 <script setup>
 import { ref, reactive, computed, h, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, ArrowRight } from '@element-plus/icons-vue'
+import { Refresh, ArrowRight, CircleCloseFilled } from '@element-plus/icons-vue'
 import { dashboardApi, lostItemApi } from '../api'
+import { isAreaClosed, formatClosedUntil } from '../utils/areaClosure'
 
 // 简单柱状条：使用渲染函数避免再注册组件文件，原生 title 作为悬浮提示
 const BarItem = {
@@ -783,6 +798,28 @@ onMounted(() => {
   cursor: pointer;
   transition: all 0.2s;
   background: #fff;
+}
+
+.area-card-closed {
+  background: #fdf6f6;
+  border-color: #f9c7c8;
+}
+
+.closed-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: #fef0f0;
+  color: #f56c6c;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-closed-alert {
+  margin-bottom: 16px;
 }
 
 .area-card:hover {

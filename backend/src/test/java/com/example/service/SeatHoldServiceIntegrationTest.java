@@ -20,6 +20,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -30,6 +32,9 @@ class SeatHoldServiceIntegrationTest {
 
     @Autowired
     private SeatHoldService seatHoldService;
+
+    @Autowired
+    private ReadingAreaService readingAreaService;
 
     @Autowired
     private RepairOrderService repairOrderService;
@@ -454,5 +459,47 @@ class SeatHoldServiceIntegrationTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> seatHoldService.getClearing(batch.getId()));
         assertTrue(ex.getMessage().contains("整批结束"));
+    }
+
+    @Test
+    void createShouldRejectAreaMarkedClosedTodayWithEndTimeInMessage() {
+        LocalDateTime closedUntil = LocalDateTime.now().plusHours(3);
+        markAreaClosed(area1, closedUntil);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> seatHoldService.createBatch(createRequest(area1, List.of(deskId("DC001")), "甲")));
+        assertTrue(ex.getMessage().contains("闭馆"));
+        // 拦截消息必须带出闭馆结束时刻，值班员才知道何时解禁
+        assertTrue(ex.getMessage().contains(closedUntil.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))));
+    }
+
+    @Test
+    void expiredClosureShouldAllowOpeningNewBatchInSameArea() {
+        // 闭馆结束时刻已过：挂牌记录仍在库里（null 不被改写），但不再拦截开批
+        markAreaClosed(area1, LocalDateTime.now().minusMinutes(1));
+
+        SeatHoldBatch batch = seatHoldService.createBatch(
+                createRequest(area1, List.of(deskId("DC001")), "甲"));
+        assertEquals(SeatHoldBatch.STATUS_OPEN, batch.getStatus());
+        assertEquals(0, deskStatus("DC001"));
+        assertNotNull(readingAreaMapper.selectById(area1).getClosedUntil(),
+                "到期后保留闭馆挂牌历史值，由看板/分区页按当前时刻判定是否闭馆中");
+    }
+
+    @Test
+    void clearClosedEarlyShouldReopenAreaImmediately() {
+        markAreaClosed(area1, LocalDateTime.now().plusHours(2));
+        assertThrows(IllegalArgumentException.class,
+                () -> seatHoldService.createBatch(createRequest(area1, List.of(deskId("DC001")), "甲")));
+
+        readingAreaService.clearClosed(area1);
+        assertNull(readingAreaMapper.selectById(area1).getClosedUntil());
+        SeatHoldBatch batch = seatHoldService.createBatch(
+                createRequest(area1, List.of(deskId("DC001")), "甲"));
+        assertEquals(SeatHoldBatch.STATUS_OPEN, batch.getStatus());
+    }
+
+    private void markAreaClosed(Long areaId, LocalDateTime closedUntil) {
+        jdbcTemplate.update("UPDATE reading_area SET closed_until = ? WHERE id = ?", closedUntil, areaId);
     }
 }

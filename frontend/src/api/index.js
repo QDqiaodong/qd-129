@@ -21,7 +21,9 @@ export const readingAreaApi = {
   getById: id => request.get(`/reading-area/${id}`),
   create: data => request.post('/reading-area', data),
   update: data => request.put('/reading-area', data),
-  delete: id => request.delete(`/reading-area/${id}`)
+  delete: id => request.delete(`/reading-area/${id}`),
+  markClosed: (id, closedUntil) => request.post(`/reading-area/${id}/close`, { closedUntil }),
+  clearClosed: id => request.delete(`/reading-area/${id}/close`)
 }
 
 export const deskChairApi = {

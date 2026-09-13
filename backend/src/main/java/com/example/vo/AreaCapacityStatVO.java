@@ -2,6 +2,7 @@ package com.example.vo;
 
 import lombok.Data;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -15,6 +16,12 @@ public class AreaCapacityStatVO {
 
     /** 分区状态：1 启用，0 停用 */
     private Integer areaStatus;
+
+    /** 挂出的闭馆结束时刻（可能已到期；以 closed 字段判断是否正在闭馆） */
+    private LocalDateTime closedUntil;
+
+    /** 是否正在闭馆：closedUntil 晚于当前时刻 */
+    private Boolean closed;
 
     /** 桌椅总数（不含已删除资产） */
     private Integer totalCount;

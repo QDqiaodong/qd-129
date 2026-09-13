@@ -46,6 +46,9 @@ class DashboardServiceIntegrationTest {
     private SeatHoldService seatHoldService;
 
     @Autowired
+    private ReadingAreaService readingAreaService;
+
+    @Autowired
     private LostItemService lostItemService;
 
     @Autowired
@@ -368,6 +371,31 @@ class DashboardServiceIntegrationTest {
         assertEquals(1, reloadedDetail.getPendingLostCount());
         assertEquals(1, reloadedDetail.getPendingLostItems().size());
         assertEquals(pending1.getItemNo(), reloadedDetail.getPendingLostItems().get(0).getItemNo());
+    }
+
+    @Test
+    void statsAndDetailShouldMarkClosedAreaUntilEndTimeOnly() {
+        // area1 今日闭馆至 3 小时后；area2 挂着已到期的闭馆牌，不应再判为闭馆
+        LocalDateTime closedUntil = LocalDateTime.now().plusHours(3);
+        jdbcTemplate.update("UPDATE reading_area SET closed_until = ? WHERE id = ?", closedUntil, area1);
+        jdbcTemplate.update("UPDATE reading_area SET closed_until = ? WHERE id = ?",
+                LocalDateTime.now().minusMinutes(1), area2);
+
+        Map<Long, AreaCapacityStatVO> stats = statsById(dashboardService.getAreaCapacityStats());
+        assertTrue(stats.get(area1).getClosed());
+        // H2 TIMESTAMP 精度到微秒且四舍五入，纳秒部分需按微秒取整后比较
+        LocalDateTime expectedMicro = closedUntil.withNano((int) Math.round(closedUntil.getNano() / 1000.0) * 1000);
+        assertEquals(expectedMicro, stats.get(area1).getClosedUntil());
+        assertFalse(stats.get(area2).getClosed(), "闭馆结束时刻已过，卡片不再显示闭馆");
+        assertNotNull(stats.get(area2).getClosedUntil(), "已到期的挂牌时刻仍保留在数据里");
+
+        AreaCapacityDetailVO closedDetail = dashboardService.getAreaCapacityDetail(area1, 10);
+        assertTrue(closedDetail.getClosed());
+        assertEquals(expectedMicro, closedDetail.getClosedUntil());
+
+        // 提前摘牌后即刻恢复
+        readingAreaService.clearClosed(area1);
+        assertFalse(statsById(dashboardService.getAreaCapacityStats()).get(area1).getClosed());
     }
 
     @Test

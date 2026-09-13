@@ -41,6 +41,7 @@ public class SeatHoldServiceImpl implements SeatHoldService {
 
     private static final int MAX_ASSETS = 500;
     private static final DateTimeFormatter BATCH_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final DateTimeFormatter CLOSED_UNTIL_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     @Autowired
     private SeatHoldBatchMapper batchMapper;
@@ -80,6 +81,13 @@ public class SeatHoldServiceImpl implements SeatHoldService {
         ReadingArea area = readingAreaMapper.selectById(areaId);
         if (area == null || area.getStatus() == null || area.getStatus() != 1) {
             throw new IllegalArgumentException("占座分区不存在或已停用");
+        }
+        // 挂着“今日闭馆”牌且未到结束时刻的分区不能开新批，错误消息必须带出结束时刻，
+        // 避免只说不能开却不知道何时解禁；到期后 closed_until 留在库里但不再产生闭馆效力
+        if (area.getClosedUntil() != null && area.getClosedUntil().isAfter(LocalDateTime.now())) {
+            throw new IllegalArgumentException("分区「" + area.getAreaName()
+                    + "」今日闭馆，闭馆至 " + area.getClosedUntil().format(CLOSED_UNTIL_FORMATTER)
+                    + "，结束时刻后再开高峰占座");
         }
         List<Long> deskChairIds = normalizeIds(request.getDeskChairIds());
         if (deskChairIds.isEmpty()) {

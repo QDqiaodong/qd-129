@@ -10,12 +10,15 @@
       停用只含档案停用、报修停用等非占座原因，临时占座不再混成一笔。
       待领取遗失件数按遗失单登记分区快照归集，只统计 PENDING，已领取闭环不计入，
       与遗失管理列表的待领取筛选口径一致。
+      closed_until 为值班员挂出的闭馆结束时刻；是否正在闭馆（closed）由服务层按当前时刻计算，
+      到期后该字段仍在但不再产生闭馆效力，卡片与开批拦截口径一致。
     -->
     <select id="findAreaCapacityStats" resultType="com.example.vo.AreaCapacityStatVO">
         SELECT ra.id AS areaId,
                ra.area_code AS areaCode,
                ra.area_name AS areaName,
                ra.status AS areaStatus,
+               ra.closed_until AS closedUntil,
                COUNT(dc.id) AS totalCount,
                COALESCE(SUM(CASE WHEN occ.desk_chair_id IS NULL AND dc.status = 1 THEN 1 ELSE 0 END), 0) AS availableCount,
                COALESCE(SUM(CASE WHEN occ.desk_chair_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS occupiedCount,
@@ -37,7 +40,7 @@
             WHERE status = 'PENDING'
             GROUP BY area_id
         ) lost ON lost.area_id = ra.id
-        GROUP BY ra.id, ra.area_code, ra.area_name, ra.status
+        GROUP BY ra.id, ra.area_code, ra.area_name, ra.status, ra.closed_until
         ORDER BY ra.area_code
     </select>
 
