@@ -5,7 +5,8 @@ import {
   indexPendingLostItems,
   holdEligibility,
   itemStatusText,
-  batchStatusText
+  batchStatusText,
+  mergeBatchIntoList
 } from '../peakSlot'
 
 describe('高峰占座工具函数', () => {
@@ -103,5 +104,56 @@ describe('高峰占座工具函数', () => {
     expect(itemStatusText('RELEASED')).toBe('已释放')
     expect(batchStatusText('OPEN')).toBe('进行中')
     expect(batchStatusText('ENDED')).toBe('已结束')
+  })
+
+  describe('mergeBatchIntoList 处置后立即同步批次列表计数', () => {
+    const list = () => [
+      { id: 1, batchNo: 'ZZ001', areaName: '第一阅览区', areaCode: 'A001', status: 'OPEN', heldCount: 2, timeoutCount: 0, releasedCount: 0, totalCount: 2 },
+      { id: 2, batchNo: 'ZZ002', areaName: '第二阅览区', areaCode: 'A002', status: 'OPEN', heldCount: 1, timeoutCount: 0, releasedCount: 0, totalCount: 1 }
+    ]
+
+    it('释放后立即把对应行的在占/已释放计数改成最新值，其他行与顺序不变', () => {
+      const updated = { id: 1, status: 'OPEN', heldCount: 1, timeoutCount: 0, releasedCount: 1, totalCount: 2 }
+      const result = mergeBatchIntoList(list(), updated)
+      expect(result[0].heldCount).toBe(1)
+      expect(result[0].releasedCount).toBe(1)
+      // 列表联表冗余字段不能被处置接口（不含分区名）覆盖掉
+      expect(result[0].areaName).toBe('第一阅览区')
+      expect(result[0].areaCode).toBe('A001')
+      expect(result[0].batchNo).toBe('ZZ001')
+      // 其他批次不受影响
+      expect(result[1].id).toBe(2)
+      expect(result[1].heldCount).toBe(1)
+    })
+
+    it('改超时/撤回同样同步超时与在占计数', () => {
+      const timedOut = mergeBatchIntoList(list(), { id: 2, status: 'OPEN', heldCount: 0, timeoutCount: 1, releasedCount: 0, totalCount: 1 })
+      expect(timedOut[1].heldCount).toBe(0)
+      expect(timedOut[1].timeoutCount).toBe(1)
+      const reverted = mergeBatchIntoList(timedOut, { id: 2, status: 'OPEN', heldCount: 1, timeoutCount: 0, releasedCount: 0, totalCount: 1 })
+      expect(reverted[1].heldCount).toBe(1)
+      expect(reverted[1].timeoutCount).toBe(0)
+    })
+
+    it('批次掉出当前筛选结果时不强行插入（进行中筛选不被破坏）', () => {
+      const result = mergeBatchIntoList(list(), { id: 99, status: 'ENDED', heldCount: 0, timeoutCount: 0, releasedCount: 3, totalCount: 3 })
+      expect(result).toHaveLength(2)
+      expect(result.find(b => b.id === 99)).toBeUndefined()
+    })
+
+    it('不就地改写原数组（返回新数组、新行对象），其余行保持同引用以减少重渲染', () => {
+      const source = list()
+      const result = mergeBatchIntoList(source, { id: 1, heldCount: 1, timeoutCount: 0, releasedCount: 1, totalCount: 2 })
+      expect(result).not.toBe(source)
+      expect(result[0]).not.toBe(source[0])
+      expect(result[1]).toBe(source[1])
+    })
+
+    it('入参为空/非法时安全返回空数组或原列表', () => {
+      expect(mergeBatchIntoList(null, { id: 1 })).toEqual([])
+      const source = list()
+      expect(mergeBatchIntoList(source, null)).toBe(source)
+      expect(mergeBatchIntoList(source, {})).toBe(source)
+    })
   })
 })

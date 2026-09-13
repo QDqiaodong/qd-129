@@ -340,7 +340,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { seatHoldApi, readingAreaApi, deskChairApi, lostItemApi } from '../api'
-import { PEAK_TIME_SLOTS, indexActiveHolds, indexPendingLostItems, holdEligibility, itemStatusText, batchStatusText } from '../utils/peakSlot'
+import { PEAK_TIME_SLOTS, indexActiveHolds, indexPendingLostItems, holdEligibility, itemStatusText, batchStatusText, mergeBatchIntoList } from '../utils/peakSlot'
 import { isAreaClosed, formatClosedUntil, closedUntilShort, closedAreaLabel } from '../utils/areaClosure'
 
 const batches = ref([])
@@ -601,8 +601,7 @@ const submitPicker = async () => {
     })
     ElMessage.success(`已追加占住 ${updated.heldCount - before.heldCount} 件资产`)
     pickerVisible.value = false
-    detail.value = updated
-    await loadBatches()
+    await syncAfterMutation(updated)
   } catch (e) {
     ElMessage.error(e.message || '追加占住失败')
   } finally {
@@ -619,8 +618,12 @@ const openDetail = async id => {
   }
 }
 
-const refreshDetail = async () => {
-  detail.value = await seatHoldApi.getBatch(detail.value.id)
+// 处置成功后：先用接口返回的最新批次同步抽屉与列表计数（立即生效，不依赖二次列表请求），
+// 再带当前筛选条件后台刷新一次；filters 全程不动，进行中等筛选不会丢
+const syncAfterMutation = updated => {
+  detail.value = { ...detail.value, ...updated }
+  batches.value = mergeBatchIntoList(batches.value, updated)
+  return loadBatches()
 }
 
 const handleRelease = async item => {
@@ -634,10 +637,9 @@ const handleRelease = async item => {
     return
   }
   try {
-    await seatHoldApi.release(detail.value.id, item.id, { operator: detail.value.operator })
+    const updated = await seatHoldApi.release(detail.value.id, item.id, { operator: detail.value.operator })
     ElMessage.success(`${item.assetCode} 已释放`)
-    await refreshDetail()
-    await loadBatches()
+    await syncAfterMutation(updated)
   } catch (e) {
     ElMessage.error(e.message || '释放失败')
   }
@@ -656,10 +658,9 @@ const handleMarkTimeout = async item => {
         inputValidator: v => (v && v.trim() ? true : '请填写值班员')
       }
     )
-    await seatHoldApi.markTimeout(detail.value.id, item.id, { operator: value })
+    const updated = await seatHoldApi.markTimeout(detail.value.id, item.id, { operator: value })
     ElMessage.success(`${item.assetCode} 已标记超时未到`)
-    await refreshDetail()
-    await loadBatches()
+    await syncAfterMutation(updated)
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return
     ElMessage.error(e.message || '标记失败')
@@ -668,10 +669,9 @@ const handleMarkTimeout = async item => {
 
 const handleRevertTimeout = async item => {
   try {
-    await seatHoldApi.revertTimeout(detail.value.id, item.id, { operator: detail.value.operator })
+    const updated = await seatHoldApi.revertTimeout(detail.value.id, item.id, { operator: detail.value.operator })
     ElMessage.success(`${item.assetCode} 已撤回到在占`)
-    await refreshDetail()
-    await loadBatches()
+    await syncAfterMutation(updated)
   } catch (e) {
     ElMessage.error(e.message || '撤回失败')
   }
@@ -690,8 +690,10 @@ const handleFinish = async () => {
   }
   finishLoading.value = true
   try {
-    detail.value = await seatHoldApi.finishBatch(detail.value.id, { operator: detail.value.operator })
+    const updated = await seatHoldApi.finishBatch(detail.value.id, { operator: detail.value.operator })
     ElMessage.success('批次已结束，遗留停用资产可在详情中清场释放')
+    detail.value = { ...detail.value, ...updated }
+    // 结束后批次可能掉出“进行中”筛选：用带当前筛选的刷新重算列表（筛选条件仍保留，不重置）
     await loadBatches()
   } catch (e) {
     ElMessage.error(e.message || '结束失败')
@@ -713,10 +715,9 @@ const handleReleaseLegacy = async item => {
         inputValidator: v => (v && v.trim() ? true : '请填写处置值班员')
       }
     )
-    await seatHoldApi.releaseLegacy(detail.value.id, item.id, { operator: value })
+    const updated = await seatHoldApi.releaseLegacy(detail.value.id, item.id, { operator: value })
     ElMessage.success(`${item.assetCode} 已释放恢复`)
-    await refreshDetail()
-    await loadBatches()
+    await syncAfterMutation(updated)
   } catch (e) {
     if (e === 'cancel' || e?.message === 'cancel') return
     ElMessage.error(e.message || '释放失败')

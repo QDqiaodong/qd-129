@@ -104,3 +104,42 @@ export function batchStatusText(status) {
     ENDED: '已结束'
   }[status] || status
 }
+
+/**
+ * 用一次处置（释放/改超时/撤回/结束/追加/清场）后接口返回的最新批次，
+ * 原地同步批次列表里对应行的计数与状态。
+ *
+ * 必须在处置成功后立即执行：抽屉操作后批次列表位于抽屉下层，二次列表请求若因
+ * 任何原因（网关/浏览器缓存、接口抖动等）拿到旧值，值班员看到的"在占/超时/已释放"
+ * 就会停在点开前的数字。直接采用处置接口返回的权威结果可以保证计数立刻变化。
+ *
+ * 不重新筛选、不重置筛选条件：进行中等状态筛选由调用方继续保留，列表里不存在的
+ * 批次（例如刚结束导致不再命中"进行中"）不强行插入，保持当前筛选结果口径。
+ *
+ * @param {Array} batches 当前批次列表（不会被改写，返回新数组）
+ * @param {Object} updated 处置接口返回的最新批次
+ * @returns {Array} 同步计数后的新批次列表
+ */
+export function mergeBatchIntoList(batches, updated) {
+  if (!updated || updated.id == null) {
+    return Array.isArray(batches) ? batches : []
+  }
+  const list = Array.isArray(batches) ? batches : []
+  let changed = false
+  const next = list.map(row => {
+    if (!row || row.id !== updated.id) {
+      return row
+    }
+    changed = true
+    // 处置接口只返回批次本身（不含分区名等列表联表字段），合并时保留列表行已有的冗余字段
+    const { areaName, areaCode, ...rest } = updated
+    return {
+      ...row,
+      ...rest,
+      areaName: areaName ?? row.areaName,
+      areaCode: areaCode ?? row.areaCode
+    }
+  })
+  // 行不在当前筛选结果里（如已结束掉出"进行中"），说明它本就不该出现，保持列表不变
+  return changed ? next : list
+}
