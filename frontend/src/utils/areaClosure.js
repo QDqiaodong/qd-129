@@ -58,3 +58,18 @@ export function closedAreaLabel(area, now = new Date()) {
 export function closedUntilShort(closedUntil, now = new Date()) {
   return formatClosedUntil(closedUntil, now).replace('今日 ', '')
 }
+
+/**
+ * 从看板分区统计里挑出此刻仍在闭馆中的分区，按结束时刻升序（最早恢复的排前面）。
+ * 容量运营看板顶部的“今晚闭馆分区”数字与点开后的闭馆清单都用它，
+ * 到期分区自动从结果里消失，闭馆结束后数字回到零，无需后端改写历史挂牌值。
+ * @param {Array<{closedUntil?: string}>} areas
+ * @param {Date} [now]
+ * @returns {Array}
+ */
+export function listClosedAreas(areas, now = new Date()) {
+  return (Array.isArray(areas) ? areas : [])
+    .filter(area => isAreaClosed(area, now))
+    .slice()
+    .sort((a, b) => new Date(a.closedUntil).getTime() - new Date(b.closedUntil).getTime())
+}

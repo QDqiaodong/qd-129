@@ -9,38 +9,75 @@
     </div>
 
     <!-- 全馆概览 -->
-    <el-row :gutter="16" class="overview-row">
-      <el-col :span="6">
-        <el-card shadow="hover" class="overview-card">
-          <div class="overview-label">阅览分区</div>
-          <div class="overview-value">{{ overview.areaCount }}</div>
-          <div class="overview-sub">个分区</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="overview-card">
-          <div class="overview-label">桌椅总数</div>
-          <div class="overview-value">{{ overview.totalCount }}</div>
-          <div class="overview-sub">
-            可用 {{ overview.availableCount }} / 占座占用 {{ overview.occupiedCount }} / 停用 {{ overview.disabledCount }}
+    <div class="overview-row">
+      <el-card shadow="hover" class="overview-card">
+        <div class="overview-label">阅览分区</div>
+        <div class="overview-value">{{ overview.areaCount }}</div>
+        <div class="overview-sub">个分区</div>
+      </el-card>
+      <el-card shadow="hover" class="overview-card">
+        <div class="overview-label">桌椅总数</div>
+        <div class="overview-value">{{ overview.totalCount }}</div>
+        <div class="overview-sub">
+          可用 {{ overview.availableCount }} / 占座占用 {{ overview.occupiedCount }} / 停用 {{ overview.disabledCount }}
+        </div>
+      </el-card>
+      <el-card shadow="hover" class="overview-card">
+        <div class="overview-label">可用容纳人数</div>
+        <div class="overview-value primary">{{ overview.totalCapacity }}</div>
+        <div class="overview-sub">人（仅统计可用桌椅）</div>
+      </el-card>
+      <!-- 今晚闭馆分区：值班员一眼看到张数；有闭馆时整卡可点，进清单再下钻分区看闭馆到几点 -->
+      <el-card
+        shadow="hover"
+        class="overview-card"
+        :class="{ 'overview-card-clickable': closedAreas.length > 0 }"
+        @click="closedAreas.length > 0 && (closedListVisible = true)"
+      >
+        <div class="overview-label">
+          今晚闭馆分区
+          <el-icon v-if="closedAreas.length > 0" class="overview-arrow"><ArrowRightBold /></el-icon>
+        </div>
+        <div class="overview-value" :class="{ danger: closedAreas.length > 0 }">{{ closedAreas.length }}</div>
+        <div class="overview-sub">
+          {{ closedAreas.length > 0 ? '个分区闭馆中 · 点击查看' : '个分区（全部开放）' }}
+        </div>
+      </el-card>
+      <el-card shadow="hover" class="overview-card">
+        <div class="overview-label">区间调区变更</div>
+        <div class="overview-value warning">{{ overview.trendCount }}</div>
+        <div class="overview-sub">{{ dateRange[0] }} ~ {{ dateRange[1] }}</div>
+      </el-card>
+    </div>
+
+    <!-- 今晚闭馆分区清单：点数字卡弹出，逐区给出闭馆至时刻，再点一行进对应分区下钻页 -->
+    <el-dialog v-model="closedListVisible" title="今晚闭馆分区" width="520px" append-to-body>
+      <el-alert
+        type="error"
+        :closable="false"
+        show-icon
+        title="闭馆结束时刻前，这些分区不能开新批次高峰占座；到期自动恢复开放，本数字归零。"
+        class="closed-list-alert"
+      />
+      <el-empty v-if="closedAreas.length === 0" description="当前没有闭馆中的分区" />
+      <ul v-else class="closed-list">
+        <li
+          v-for="area in closedAreas"
+          :key="area.areaId"
+          class="closed-list-item"
+          @click="openClosedArea(area.areaId)"
+        >
+          <div class="closed-item-main">
+            <span class="area-code">{{ area.areaCode }}</span>
+            <span class="closed-item-name">{{ area.areaName }}</span>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="overview-card">
-          <div class="overview-label">可用容纳人数</div>
-          <div class="overview-value primary">{{ overview.totalCapacity }}</div>
-          <div class="overview-sub">人（仅统计可用桌椅）</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="overview-card">
-          <div class="overview-label">区间调区变更</div>
-          <div class="overview-value warning">{{ overview.trendCount }}</div>
-          <div class="overview-sub">{{ dateRange[0] }} ~ {{ dateRange[1] }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
+          <div class="closed-item-aside">
+            <el-tag type="danger" size="small" effect="dark">闭馆至 {{ formatClosedUntil(area.closedUntil, now) }}</el-tag>
+            <el-icon class="closed-item-arrow"><ArrowRight /></el-icon>
+          </div>
+        </li>
+      </ul>
+    </el-dialog>
 
     <!-- 分区容量卡片 -->
     <el-card class="section-card">
@@ -67,7 +104,7 @@
 
         <el-row v-else :gutter="16">
           <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="area in areaStats" :key="area.areaId">
-            <div class="area-card" :class="{ 'area-card-closed': isAreaClosed(area) }" @click="openDetail(area.areaId)">
+            <div class="area-card" :class="{ 'area-card-closed': cardClosed(area) }" @click="openDetail(area.areaId)">
               <div class="area-card-header">
                 <div class="area-title-wrap">
                   <span class="area-code">{{ area.areaCode }}</span>
@@ -410,11 +447,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, h, onMounted } from 'vue'
+import { ref, reactive, computed, h, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, ArrowRight, CircleCloseFilled } from '@element-plus/icons-vue'
+import { Refresh, ArrowRight, ArrowRightBold, CircleCloseFilled } from '@element-plus/icons-vue'
 import { dashboardApi, lostItemApi } from '../api'
-import { isAreaClosed, formatClosedUntil } from '../utils/areaClosure'
+import { isAreaClosed, formatClosedUntil, listClosedAreas } from '../utils/areaClosure'
+
+// 闭馆是否到期以当前时刻为准。页面长时间挂着不关时，过了闭馆结束时刻也要自动归零、
+// 自动摘牌，不依赖手动刷新：每 30 秒把当前时刻推进一次，闭馆数字/横幅随之重算
+const now = ref(new Date())
+const nowTimer = setInterval(() => { now.value = new Date() }, 30000)
+onBeforeUnmount(() => clearInterval(nowTimer))
 
 // 简单柱状条：使用渲染函数避免再注册组件文件，原生 title 作为悬浮提示
 const BarItem = {
@@ -539,6 +582,20 @@ const overview = computed(() => {
   summary.trendCount = trendData.value.reduce((sum, item) => sum + item.changeCount, 0)
   return summary
 })
+
+// ---- 今晚闭馆分区 ----
+// 顶部数字卡与点开后的闭馆清单同一口径：只含结束时刻晚于当前时刻的分区，到期自动掉到 0
+const closedAreas = computed(() => listClosedAreas(areaStats.value, now.value))
+const closedListVisible = ref(false)
+
+// 从闭馆清单点进对应分区下钻：关掉清单弹层后打开该分区抽屉，抽屉里能看到“闭馆至几点”
+const openClosedArea = async (areaId) => {
+  closedListVisible.value = false
+  await openDetail(areaId)
+}
+
+// 卡片/抽屉的闭馆判定统一跟随上面的当前时刻，保证到期不刷新也自动摘牌
+const cardClosed = area => isAreaClosed(area, now.value)
 
 // ---- 分区下钻 ----
 const detailVisible = ref(false)

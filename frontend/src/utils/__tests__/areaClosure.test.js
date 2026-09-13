@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isAreaClosed, formatClosedUntil, closedUntilShort, closedAreaLabel } from '../areaClosure'
+import { isAreaClosed, formatClosedUntil, closedUntilShort, closedAreaLabel, listClosedAreas } from '../areaClosure'
 
 describe('阅览区今日闭馆工具', () => {
   const now = new Date(2026, 8, 12, 10, 0) // 2026-09-12 10:00 本地时间
@@ -36,5 +36,27 @@ describe('阅览区今日闭馆工具', () => {
   it('closedUntilShort 今天只给时刻，跨日保留日期前缀', () => {
     expect(closedUntilShort('2026-09-12T21:00:00', now)).toBe('21:00')
     expect(closedUntilShort('2026-09-13T09:00:00', now)).toBe('次日 09:00')
+  })
+
+  it('listClosedAreas 只留闭馆中分区并按结束时刻升序', () => {
+    const areas = [
+      { areaId: 1, areaName: 'A区', closedUntil: '2026-09-13T09:00:00' },
+      { areaId: 2, areaName: 'B区', closedUntil: '2026-09-12T18:30:00' },
+      { areaId: 3, areaName: 'C区', closedUntil: '2026-09-12T10:00:00' }, // 刚到期
+      { areaId: 4, areaName: 'D区' }, // 从未挂牌
+      null
+    ]
+    const closed = listClosedAreas(areas, now)
+    expect(closed.map(a => a.areaId)).toEqual([2, 1])
+  })
+
+  it('listClosedAreas 闭馆全部结束后回到空列表（数字归零）', () => {
+    const areas = [
+      { areaId: 1, closedUntil: '2026-09-12T09:00:00' },
+      { areaId: 2, closedUntil: '2026-09-12T08:00:00' }
+    ]
+    expect(listClosedAreas(areas, now)).toEqual([])
+    expect(listClosedAreas(null, now)).toEqual([])
+    expect(listClosedAreas(undefined, now)).toEqual([])
   })
 })
