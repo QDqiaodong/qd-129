@@ -173,19 +173,21 @@ const loadTags = async () => {
   tags.value = await tagApi.getAll()
 }
 
-const handleFilter = async () => {
+const refreshDeskChairs = async () => {
   if (filters.value.areaId) {
     deskChairs.value = await deskChairApi.getByAreaId(filters.value.areaId)
-  } else if (filters.value.tagIds && filters.value.tagIds.length > 0) {
+  } else if (filters.value.tagIds?.length) {
     deskChairs.value = await deskChairApi.getByTagIds(filters.value.tagIds)
   } else {
     await loadData()
   }
 }
 
+const handleFilter = () => refreshDeskChairs()
+
 const resetFilter = () => {
   filters.value = { areaId: null, tagIds: [] }
-  loadData()
+  return refreshDeskChairs()
 }
 
 const openAddModal = () => {
@@ -208,7 +210,7 @@ const handleSubmit = async () => {
       await deskChairApi.create(form.value)
     }
     dialogVisible.value = false
-    await loadData()
+    await refreshDeskChairs()
     ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
   } catch (e) {
     ElMessage.error(e.message || (isEdit.value ? '更新失败' : '添加失败'))
@@ -227,7 +229,7 @@ const handleDelete = async (id) => {
   }
   try {
     await deskChairApi.delete(id)
-    await loadData()
+    await refreshDeskChairs()
     ElMessage.success('删除成功')
   } catch (e) {
     ElMessage.error(e.message || '删除失败')
@@ -253,7 +255,7 @@ const handleSaveTags = async () => {
   try {
     await deskChairApi.bindTags(currentDeskChair.value.id, selectedTagIds.value)
     tagDialogVisible.value = false
-    await loadData()
+    await refreshDeskChairs()
     ElMessage.success('标签更新成功')
   } catch (e) {
     ElMessage.error(e.message || '标签更新失败')
@@ -274,7 +276,7 @@ const handleUpdateArea = async () => {
       operator: areaForm.value.operator
     })
     areaDialogVisible.value = false
-    await loadData()
+    await refreshDeskChairs()
     ElMessage.success('分区调整成功')
   } catch (e) {
     ElMessage.error(e.message || '分区调整失败')
