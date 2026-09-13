@@ -88,4 +88,47 @@ public class ReadingAreaServiceImpl implements ReadingAreaService {
                 .set(ReadingArea::getUpdatedAt, LocalDateTime.now()));
         return readingAreaMapper.selectById(id);
     }
+
+    @Override
+    public ReadingArea markExtraSeats(Long id, Integer extraSeatCount, LocalDateTime extraSeatUntil) {
+        if (id == null) {
+            throw new IllegalArgumentException("缺少阅览分区");
+        }
+        if (extraSeatCount == null || extraSeatCount <= 0) {
+            throw new IllegalArgumentException("请填写增加的座位数");
+        }
+        if (extraSeatUntil == null) {
+            throw new IllegalArgumentException("请选择加座失效时刻");
+        }
+        if (!extraSeatUntil.isAfter(LocalDateTime.now())) {
+            throw new IllegalArgumentException("加座失效时刻必须晚于当前时间");
+        }
+        ReadingArea area = readingAreaMapper.selectById(id);
+        if (area == null) {
+            throw new IllegalArgumentException("阅览分区不存在");
+        }
+        readingAreaMapper.update(null, new LambdaUpdateWrapper<ReadingArea>()
+                .eq(ReadingArea::getId, id)
+                .set(ReadingArea::getExtraSeatCount, extraSeatCount)
+                .set(ReadingArea::getExtraSeatUntil, extraSeatUntil)
+                .set(ReadingArea::getUpdatedAt, LocalDateTime.now()));
+        return readingAreaMapper.selectById(id);
+    }
+
+    @Override
+    public ReadingArea clearExtraSeats(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("缺少阅览分区");
+        }
+        ReadingArea area = readingAreaMapper.selectById(id);
+        if (area == null) {
+            throw new IllegalArgumentException("阅览分区不存在");
+        }
+        readingAreaMapper.update(null, new LambdaUpdateWrapper<ReadingArea>()
+                .eq(ReadingArea::getId, id)
+                .set(ReadingArea::getExtraSeatCount, 0)
+                .set(ReadingArea::getExtraSeatUntil, null)
+                .set(ReadingArea::getUpdatedAt, LocalDateTime.now()));
+        return readingAreaMapper.selectById(id);
+    }
 }
