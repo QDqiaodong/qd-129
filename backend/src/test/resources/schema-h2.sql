@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS reading_area (
     description CLOB,
     status TINYINT DEFAULT 1,
     closed_until TIMESTAMP NULL,
+    extra_seat_count INT NOT NULL DEFAULT 0,
+    extra_seat_until TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

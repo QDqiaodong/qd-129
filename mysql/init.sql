@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS reading_area (
     description TEXT,
     status TINYINT DEFAULT 1,
     closed_until DATETIME NULL,
+    extra_seat_count INT NOT NULL DEFAULT 0,
+    extra_seat_until DATETIME NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -302,6 +304,25 @@ SET @ddl := (SELECT IF(
     (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reading_area' AND COLUMN_NAME = 'closed_until') = 0,
     'ALTER TABLE reading_area ADD COLUMN closed_until DATETIME NULL AFTER status',
+    'SELECT 1'));
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 今晚临时加座：值班员为阅览区挂带失效时刻的临时名额（已建库环境补列，幂等）
+SET @ddl := (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reading_area' AND COLUMN_NAME = 'extra_seat_count') = 0,
+    'ALTER TABLE reading_area ADD COLUMN extra_seat_count INT NOT NULL DEFAULT 0 AFTER closed_until',
+    'SELECT 1'));
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @ddl := (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reading_area' AND COLUMN_NAME = 'extra_seat_until') = 0,
+    'ALTER TABLE reading_area ADD COLUMN extra_seat_until DATETIME NULL AFTER extra_seat_count',
     'SELECT 1'));
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
