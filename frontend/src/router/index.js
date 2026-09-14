@@ -46,6 +46,11 @@ const routes = [
     component: () => import('../views/SeatHold.vue')
   },
   {
+    path: '/night-inspection',
+    name: 'NightInspection',
+    component: () => import('../views/NightInspection.vue')
+  },
+  {
     path: '/lost-item',
     name: 'LostItem',
     component: () => import('../views/LostItem.vue')

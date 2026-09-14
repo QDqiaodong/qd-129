@@ -191,6 +191,45 @@ CREATE INDEX IF NOT EXISTS idx_lost_item_area_status ON lost_item (area_id, stat
 CREATE INDEX IF NOT EXISTS idx_lost_item_desk_chair ON lost_item (desk_chair_id);
 CREATE INDEX IF NOT EXISTS idx_lost_item_status ON lost_item (status);
 
+CREATE TABLE IF NOT EXISTS night_inspection_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no VARCHAR(40) NOT NULL UNIQUE,
+    area_id BIGINT NOT NULL,
+    total_count INT NOT NULL DEFAULT 0,
+    checked_count INT NOT NULL DEFAULT 0,
+    problem_count INT NOT NULL DEFAULT 0,
+    remark VARCHAR(500),
+    operator VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    completed_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ni_batch_area_status ON night_inspection_batch (area_id, status);
+
+CREATE TABLE IF NOT EXISTS night_inspection_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    batch_no VARCHAR(40) NOT NULL,
+    desk_chair_id BIGINT NOT NULL,
+    asset_code VARCHAR(50) NOT NULL,
+    area_id BIGINT NOT NULL,
+    light_result VARCHAR(20) NULL,
+    socket_result VARCHAR(20) NULL,
+    desk_surface_result VARCHAR(20) NULL,
+    problem_detail VARCHAR(1000) NULL,
+    has_problem TINYINT NOT NULL DEFAULT 0,
+    handle_opinion VARCHAR(1000) NULL,
+    check_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    checked_by VARCHAR(100) NULL,
+    checked_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ni_item_batch_id ON night_inspection_item (batch_id);
+CREATE INDEX IF NOT EXISTS idx_ni_item_desk_chair ON night_inspection_item (desk_chair_id);
+CREATE INDEX IF NOT EXISTS idx_ni_item_area_problem ON night_inspection_item (area_id, has_problem);
+
 CREATE TABLE IF NOT EXISTS seat_hold_batch (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     batch_no VARCHAR(40) NOT NULL UNIQUE,

@@ -258,6 +258,47 @@ CREATE TABLE IF NOT EXISTS seat_hold_item (
     INDEX idx_item_status (item_status)
 );
 
+CREATE TABLE IF NOT EXISTS night_inspection_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no VARCHAR(40) NOT NULL UNIQUE COMMENT '巡检批次号 XJ+时间戳+随机串',
+    area_id BIGINT NOT NULL COMMENT '值班员开批时选定的阅览分区',
+    total_count INT NOT NULL DEFAULT 0 COMMENT '应巡数量：建批时按分区在册桌椅数（含停用）固化',
+    checked_count INT NOT NULL DEFAULT 0 COMMENT '已巡数量：已逐件提交灯/插座/桌面结果的明细数',
+    problem_count INT NOT NULL DEFAULT 0 COMMENT '问题数量：已巡明细中存在灯/插座/桌面异常的件数',
+    remark VARCHAR(500),
+    operator VARCHAR(100) NOT NULL COMMENT '开批值班员',
+    status VARCHAR(20) NOT NULL COMMENT 'OPEN巡检中/COMPLETED已结束',
+    completed_at DATETIME NULL COMMENT '批次结束时间',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (area_id) REFERENCES reading_area(id),
+    INDEX idx_area_status (area_id, status)
+);
+
+CREATE TABLE IF NOT EXISTS night_inspection_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    batch_no VARCHAR(40) NOT NULL,
+    desk_chair_id BIGINT NOT NULL,
+    asset_code VARCHAR(50) NOT NULL COMMENT '资产编号快照',
+    area_id BIGINT NOT NULL COMMENT '巡检时所属分区快照',
+    light_result VARCHAR(20) NULL COMMENT '灯巡检结果 NORMAL正常/ABNORMAL不亮，空=未登记',
+    socket_result VARCHAR(20) NULL COMMENT '插座巡检结果 NORMAL正常/ABNORMAL失灵，空=未登记',
+    desk_surface_result VARCHAR(20) NULL COMMENT '桌面巡检结果 NORMAL正常/ABNORMAL涂鸦破损，空=未登记',
+    problem_detail VARCHAR(1000) NULL COMMENT '问题补充描述',
+    has_problem TINYINT NOT NULL DEFAULT 0 COMMENT '是否有问题：灯/插座/桌面任一项异常即为1',
+    handle_opinion VARCHAR(1000) NULL COMMENT '处理意见：有问题时必填',
+    check_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING待巡/CHECKED已巡',
+    checked_by VARCHAR(100) NULL COMMENT '巡检登记人',
+    checked_at DATETIME NULL COMMENT '登记时间',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (batch_id) REFERENCES night_inspection_batch(id),
+    INDEX idx_batch_id (batch_id),
+    INDEX idx_desk_chair_id (desk_chair_id),
+    INDEX idx_area_problem (area_id, has_problem)
+);
+
 INSERT INTO reading_area (area_code, area_name, description) VALUES
 ('A001', '第一阅览区', '主馆一层东侧，自然科学类'),
 ('A002', '第二阅览区', '主馆一层西侧，社会科学类'),

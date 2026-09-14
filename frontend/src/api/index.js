@@ -91,6 +91,21 @@ export const stocktakeApi = {
   completeBatch: (id, data) => request.post(`/stocktake/batch/${id}/complete`, data)
 }
 
+export const nightInspectionApi = {
+  createBatch: data => request.post('/night-inspection/batch', data),
+  listBatches: params => request.get('/night-inspection/batch', {
+    params: { areaId: params?.areaId || undefined, status: params?.status || undefined }
+  }),
+  getBatch: id => request.get(`/night-inspection/batch/${id}`),
+  checkItem: (batchId, itemId, data) =>
+    request.post(`/night-inspection/batch/${batchId}/item/${itemId}/check`, data),
+  completeBatch: (id, data) => request.post(`/night-inspection/batch/${id}/complete`, data),
+  listRecords: params => request.get('/night-inspection/record', {
+    params: { areaId: params?.areaId || undefined, hasProblem: params?.hasProblem }
+  }),
+  getDeskChairRecords: deskChairId => request.get(`/night-inspection/desk-chair/${deskChairId}/records`)
+}
+
 export const lostItemApi = {
   create: data => request.post('/lost-item', data),
   list: params => request.get('/lost-item', {
