@@ -27,6 +27,13 @@ public interface NightInspectionBatchMapper extends BaseMapper<NightInspectionBa
             "WHERE b.id = #{id}")
     NightInspectionBatch findByIdWithArea(@Param("id") Long id);
 
+    /**
+     * 行级锁定批次：登记明细与结束批次都先锁同一行，
+     * 让“读状态 → 写明细/翻状态”串行化，杜绝结束瞬间在途提交把已结束明细改掉。
+     */
+    @Select("SELECT * FROM night_inspection_batch WHERE id = #{id} FOR UPDATE")
+    NightInspectionBatch selectByIdForUpdate(@Param("id") Long id);
+
     @Select("SELECT b.*, ra.area_name, ra.area_code " +
             "FROM night_inspection_batch b LEFT JOIN reading_area ra ON b.area_id = ra.id " +
             "WHERE b.area_id = #{areaId} AND b.status = 'OPEN' " +

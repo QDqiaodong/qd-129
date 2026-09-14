@@ -17,6 +17,7 @@ import com.example.service.NightInspectionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
@@ -101,9 +102,9 @@ public class NightInspectionServiceImpl implements NightInspectionService {
     }
 
     @Override
+    @Transactional
     public NightInspectionBatch checkItem(Long batchId, Long itemId, NightInspectionCheckRequest request) {
-        NightInspectionBatch batch = requireBatch(batchId);
-        requireOpen(batch);
+        NightInspectionBatch batch = requireOpenBatchForUpdate(batchId);
         NightInspectionItem item = requireItem(batch, itemId);
         String operator = requireText(request == null ? null : request.getOperator(), "操作人不能为空");
 
@@ -140,9 +141,9 @@ public class NightInspectionServiceImpl implements NightInspectionService {
     }
 
     @Override
+    @Transactional
     public NightInspectionBatch completeBatch(Long batchId, NightInspectionHandleRequest request) {
-        NightInspectionBatch batch = requireBatch(batchId);
-        requireOpen(batch);
+        NightInspectionBatch batch = requireOpenBatchForUpdate(batchId);
         requireText(request == null ? null : request.getOperator(), "操作人不能为空");
 
         List<NightInspectionItem> items = itemMapper.findByBatchIdWithArea(batch.getId());
@@ -169,7 +170,17 @@ public class NightInspectionServiceImpl implements NightInspectionService {
         batch.setStatus(NightInspectionBatch.STATUS_COMPLETED);
         batch.setCompletedAt(LocalDateTime.now());
         batch.setUpdatedAt(LocalDateTime.now());
-        batchMapper.updateById(batch);
+        // 行锁已持有，仍以 status='OPEN' 作为更新条件兜底：
+        // 只有巡检中的批次能翻成已结束，重复/并发结束一律拦住。
+        int updated = batchMapper.update(null, new LambdaUpdateWrapper<NightInspectionBatch>()
+                .eq(NightInspectionBatch::getId, batch.getId())
+                .eq(NightInspectionBatch::getStatus, NightInspectionBatch.STATUS_OPEN)
+                .set(NightInspectionBatch::getStatus, NightInspectionBatch.STATUS_COMPLETED)
+                .set(NightInspectionBatch::getCompletedAt, batch.getCompletedAt())
+                .set(NightInspectionBatch::getUpdatedAt, batch.getUpdatedAt()));
+        if (updated == 0) {
+            throw new IllegalArgumentException("巡检批次 " + batch.getBatchNo() + " 已结束，不能重复结束");
+        }
         return findBatchById(batch.getId());
     }
 
@@ -209,21 +220,23 @@ public class NightInspectionServiceImpl implements NightInspectionService {
 
     // ==================== 公共校验与工具 ====================
 
-    private NightInspectionBatch requireBatch(Long batchId) {
+    /**
+     * 登记/结束等写操作专用：在当前事务内对批次行加排他锁后再判定状态。
+     * checkItem 与 completeBatch 锁同一行，彼此串行；
+     * 批次一旦被结束，后来的在途登记拿锁后必看到 COMPLETED 而被拒。
+     */
+    private NightInspectionBatch requireOpenBatchForUpdate(Long batchId) {
         if (batchId == null) {
             throw new IllegalArgumentException("缺少巡检批次");
         }
-        NightInspectionBatch batch = batchMapper.selectById(batchId);
+        NightInspectionBatch batch = batchMapper.selectByIdForUpdate(batchId);
         if (batch == null) {
             throw new IllegalArgumentException("巡检批次不存在");
         }
-        return batch;
-    }
-
-    private void requireOpen(NightInspectionBatch batch) {
         if (NightInspectionBatch.STATUS_COMPLETED.equals(batch.getStatus())) {
             throw new IllegalArgumentException("巡检批次 " + batch.getBatchNo() + " 已结束，禁止再登记");
         }
+        return batch;
     }
 
     private NightInspectionItem requireItem(NightInspectionBatch batch, Long itemId) {
@@ -254,12 +267,21 @@ public class NightInspectionServiceImpl implements NightInspectionService {
         return value;
     }
 
-    /** 已巡/问题数量按明细实况重算，重复提交同一件不会产生重复计数 */
+    /**
+     * 已巡/问题数量按明细实况重算，重复提交同一件不会产生重复计数。
+     * 只更新计数列，绝不用可能陈旧的内存对象整行回写，
+     * 以免覆盖 status/completed_at（结束后被并发登记改回巡检中曾因此发生）。
+     */
     private void refreshCounts(NightInspectionBatch batch) {
-        batch.setCheckedCount(itemMapper.countChecked(batch.getId()));
-        batch.setProblemCount(itemMapper.countProblem(batch.getId()));
-        batch.setUpdatedAt(LocalDateTime.now());
-        batchMapper.updateById(batch);
+        int checkedCount = itemMapper.countChecked(batch.getId());
+        int problemCount = itemMapper.countProblem(batch.getId());
+        batchMapper.update(null, new LambdaUpdateWrapper<NightInspectionBatch>()
+                .eq(NightInspectionBatch::getId, batch.getId())
+                .set(NightInspectionBatch::getCheckedCount, checkedCount)
+                .set(NightInspectionBatch::getProblemCount, problemCount)
+                .set(NightInspectionBatch::getUpdatedAt, LocalDateTime.now()));
+        batch.setCheckedCount(checkedCount);
+        batch.setProblemCount(problemCount);
     }
 
     private String requireText(String text, String message) {

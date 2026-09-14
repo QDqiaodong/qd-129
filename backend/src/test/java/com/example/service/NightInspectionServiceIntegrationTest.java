@@ -17,7 +17,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -259,6 +265,68 @@ class NightInspectionServiceIntegrationTest {
                         checkRequest("NORMAL", "NORMAL", "NORMAL", null, "张三")));
         assertThrows(IllegalArgumentException.class,
                 () -> nightInspectionService.completeBatch(doneId, handle("张三")));
+    }
+
+    @Test
+    void checkAndCompleteConcurrentlyShouldNeverMutateAfterCompletion() throws Exception {
+        // 结束批次与“提交该件”并发时，越过结束时刻的在途登记必须被拒：
+        // 不允许任何明细的登记时间晚于批次结束时间（结束后明细只读）。
+        for (int round = 0; round < 10; round++) {
+            NightInspectionBatch batch = nightInspectionService.createBatch(createRequest(area2, "张三"));
+            checkOne(batch, "DC004", "NORMAL", "NORMAL", "NORMAL", null);
+
+            Long batchId = batch.getId();
+            NightInspectionItem only = itemOf(batch, "DC004");
+            Long itemId = only.getId();
+            CountDownLatch start = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                List<Future<?>> futures = new ArrayList<>();
+                // 线程A：尝试把已巡明细改成“灯不亮 + 处理意见”
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    nightInspectionService.checkItem(batchId, itemId,
+                            checkRequest("ABNORMAL", "NORMAL", "NORMAL", "并发篡改的处理意见", "李四"));
+                    return null;
+                }));
+                // 线程B：结束批次
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    nightInspectionService.completeBatch(batchId, handle("张三"));
+                    return null;
+                }));
+                start.countDown();
+
+                for (Future<?> f : futures) {
+                    try {
+                        f.get(5, TimeUnit.SECONDS);
+                    } catch (Exception ignored) {
+                        // 期望结束后才落地的在途登记抛“已结束”，结束方正常返回
+                    }
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+
+            NightInspectionBatch done = nightInspectionService.findBatchById(batchId);
+            assertEquals(NightInspectionBatch.STATUS_COMPLETED, done.getStatus());
+            assertNotNull(done.getCompletedAt());
+            NightInspectionItem snapshot = itemOf(done, "DC004");
+            assertNotNull(snapshot.getCheckedAt());
+            // 核心不变量：任何明细改动都必须落在结束时刻之前，结束后不能再改
+            assertFalse(snapshot.getCheckedAt().isAfter(done.getCompletedAt()),
+                    "批次结束后明细仍被在途提交改动（checked_at 晚于 completed_at）");
+            // 若明细被改成异常，必是“先登记后结束”，且批次问题数仍为结束时实况
+            if (NightInspectionItem.RESULT_ABNORMAL.equals(snapshot.getLightResult())) {
+                assertTrue(snapshot.getCheckedAt().isBefore(done.getCompletedAt())
+                        || snapshot.getCheckedAt().equals(done.getCompletedAt()));
+                assertEquals(1, done.getProblemCount());
+            } else {
+                assertEquals("张三", snapshot.getCheckedBy());
+                assertNull(snapshot.getHandleOpinion());
+                assertEquals(0, done.getProblemCount());
+            }
+        }
     }
 
     @Test

@@ -237,7 +237,7 @@
           </div>
         </div>
 
-        <!-- 逐件登记 -->
+        <!-- 逐件登记表：灯/插座/桌面等编辑控件仅在巡检中（isOpen）渲染，结束后为纯文本只读 -->
         <el-table :data="detail.items" border size="small" class="item-table">
           <el-table-column prop="assetCode" label="资产编号" width="100" fixed />
           <el-table-column label="灯" :width="isOpen ? 130 : 90">
@@ -519,6 +519,12 @@ const openDetail = async id => {
 }
 
 const submitItem = async item => {
+  // 结束后只读：控件虽已隐藏，仍拦住任何在途/陈旧状态触发的再提交
+  if (!isOpen.value) {
+    ElMessage.warning('该巡检批次已结束，明细只读，不能再登记或修改')
+    await reopenDetail()
+    return
+  }
   const form = entryForms.value[item.id]
   const error = validateInspectionEntry(form)
   if (error) {
@@ -545,12 +551,19 @@ const submitItem = async item => {
     await loadRecords()
   } catch (e) {
     ElMessage.error(e.message || '提交失败')
+    // 批次可能恰好在本请求在途期间被结束：回刷详情，界面立即切成只读，避免继续误改
+    if (isBatchClosedError(e)) await reopenDetail()
   } finally {
     submittingId.value = null
   }
 }
 
 const handleComplete = async () => {
+  if (!isOpen.value) {
+    ElMessage.warning('该巡检批次已结束，不能重复结束')
+    await reopenDetail()
+    return
+  }
   if (!canCompleteBatch(detail.value)) {
     ElMessage.error(`仍有 ${pendingItems.value.length} 件桌椅未巡检，批次没巡完不能结束`)
     return
@@ -569,13 +582,32 @@ const handleComplete = async () => {
     detail.value = await nightInspectionApi.completeBatch(detail.value.id, {
       operator: entryOperator.value || detail.value.operator
     })
+    initEntryForms()
     ElMessage.success('巡检批次已结束')
     await loadBatches()
     await loadRecords()
   } catch (e) {
     ElMessage.error(e.message || '结束失败')
+    if (isBatchClosedError(e)) await reopenDetail()
   } finally {
     completeLoading.value = false
+  }
+}
+
+// 后端以 400 + “已结束”文案拒绝并发/越权写入
+const isBatchClosedError = e => /已结束/.test(e?.message || '')
+
+// 重新拉取当前批次并同步登记表单，确保界面与后端锁定状态一致（只读）
+const reopenDetail = async () => {
+  if (!detail.value) return
+  try {
+    detail.value = await nightInspectionApi.getBatch(detail.value.id)
+    initEntryForms()
+    entryOperator.value = detail.value.operator || ''
+    await loadBatches()
+    await loadRecords()
+  } catch (e) {
+    ElMessage.error(e.message || '刷新巡检详情失败')
   }
 }
 
