@@ -237,8 +237,9 @@ class NightInspectionServiceIntegrationTest {
         batch = checkOne(batch, "DC001", "NORMAL", "NORMAL", "NORMAL", null);
 
         NightInspectionBatch current = batch;
+        final Long openBatchId = current.getId();
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> nightInspectionService.completeBatch(current.getId(), handle("张三")));
+                () -> nightInspectionService.completeBatch(openBatchId, handle("张三")));
         assertTrue(ex.getMessage().contains("未巡检"));
 
         current = checkOne(current, "DC002", "ABNORMAL", "NORMAL", "NORMAL", "灯管不亮，已登记报修");
